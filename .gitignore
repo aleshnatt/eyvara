@@ -1,2 +1,6 @@
-/paper/
-/scripts/
+/target
+Cargo.lock
+**/*.DS_Store
+.DS_Store
+/paper
+/scripts

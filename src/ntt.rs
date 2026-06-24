@@ -434,7 +434,7 @@ mod tests {
             let reduced = montgomery_reduce(a[i]);
             let got = ((reduced % Q) + Q) % Q;
             let expected = ((original[i] % Q) + Q) % Q;
-            assert_eq!(got, expected, "mismatch at index {}", i);
+            assert_eq!(got, expected, "mismatch at index {i}");
         }
     }
 

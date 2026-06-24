@@ -118,12 +118,13 @@ mod tests {
     #[test]
     fn test_sample_in_ball_weight() {
         let seed = [42u8; CHALLENGE_SEED_SIZE];
-        let c = sample_in_ball(&seed, EYVARA_128.tau);
+        let c = sample_in_ball(&seed, EYVARA_128.tau());
 
         // Count nonzero coefficients
         let weight: usize = c.iter().filter(|&&v| v != 0).count();
         assert_eq!(
-            weight, EYVARA_128.tau,
+            weight,
+            EYVARA_128.tau(),
             "challenge should have exactly tau nonzero coefficients"
         );
 
@@ -131,8 +132,7 @@ mod tests {
         for &v in c.iter() {
             assert!(
                 v == -1 || v == 0 || v == 1,
-                "coefficient {} not in {{-1, 0, 1}}",
-                v
+                "coefficient {v} not in {{-1, 0, 1}}"
             );
         }
     }

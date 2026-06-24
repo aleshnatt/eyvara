@@ -27,24 +27,26 @@
 //! lattice-based Verifiable Random Function from Module-LWE.
 //!
 //! The public API consists of key generation, evaluation, verification, and
-//! two parameter sets.
+//! two sealed parameter sets.
 //!
 //! ```rust
-//! use eyvara_vrf::{eyvara_eval, eyvara_keygen, eyvara_verify, EYVARA_128};
-//! use rand::SeedableRng;
-//! use rand_chacha::ChaCha20Rng;
+//! use eyvara_vrf::{eyvara_eval, eyvara_keygen, eyvara_verify, EyvaraError, EYVARA_128};
+//! use rand::rngs::OsRng;
 //!
-//! let mut rng = ChaCha20Rng::seed_from_u64(42);
-//! let (pk, sk) = eyvara_keygen(&EYVARA_128, &mut rng);
+//! fn main() -> Result<(), EyvaraError> {
+//!     let mut rng = OsRng;
+//!     let (pk, sk) = eyvara_keygen(&EYVARA_128, &mut rng);
 //!
-//! let input = b"example input";
-//! let (output, proof) = eyvara_eval(&EYVARA_128, &sk, input, &mut rng)
-//!     .expect("evaluation should succeed");
+//!     let input = b"example input";
+//!     let (output, proof) = eyvara_eval(&EYVARA_128, &sk, input, &mut rng)?;
 //!
-//! assert!(eyvara_verify(&EYVARA_128, &pk, input, &output, &proof));
+//!     assert!(eyvara_verify(&EYVARA_128, &pk, input, &output, &proof)?);
+//!     Ok(())
+//! }
 //! ```
 
 pub(crate) mod challenge;
+pub mod error;
 pub mod eval;
 pub mod keygen;
 pub(crate) mod ntt;
@@ -52,7 +54,8 @@ pub mod params;
 pub(crate) mod poly;
 pub mod verify;
 
-pub use eval::{eyvara_eval, EyvaraOutput, EyvaraProof};
+pub use error::EyvaraError;
+pub use eval::{eyvara_eval, EyvaraOutput, EyvaraProof, VrfOutput, VrfProof};
 pub use keygen::{eyvara_keygen, PublicKey, SecretKey};
 pub use params::{Params, EYVARA_128, EYVARA_192};
 pub use verify::eyvara_verify;

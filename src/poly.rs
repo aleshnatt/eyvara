@@ -1,24 +1,22 @@
 //! Polynomial arithmetic and sampling operations.
 //!
-//! Provides the core polynomial operations over R_q = Z_q[X]/(X^N + 1) for
-//! the Eyvara VRF: addition, subtraction, scalar multiplication, norm computation,
-//! sampling (uniform and centered binomial), and the HighBits/LowBits/MakeHint/UseHint
-//! decomposition functions essential for the Dilithium-style proof structure.
+//! Provides the core polynomial operations over `R_q = Z_q[X]/(X^N + 1)` for
+//! the Eyvara VRF.
 
+use crate::error::EyvaraError;
 use crate::ntt::{ntt_forward, ntt_inverse, ntt_pointwise_mul, reduce_coeff};
 use crate::params::{DOMAIN_MATRIX, N, Q, SEED_SIZE};
-use rand::Rng;
+use rand::RngCore;
 use sha3::{
     digest::{ExtendableOutput, Update, XofReader},
     Shake256,
 };
 use zeroize::Zeroize;
 
-/// A polynomial in R_q = Z_q[X]/(X^N + 1), represented as an array of N coefficients.
-/// Coefficients are stored in centered representation: each c_i ∈ [-(Q-1)/2, (Q-1)/2].
+/// A polynomial in `R_q`, represented as an array of N centered coefficients.
 pub type Poly = [i64; N];
 
-/// A vector of polynomials, representing an element of R_q^k.
+/// A vector of polynomials, representing an element of `R_q^k`.
 pub type PolyVec = Vec<Poly>;
 
 /// Polynomial wrapper that zeroizes coefficients when dropped.
@@ -54,10 +52,6 @@ pub fn poly_sub(a: &Poly, b: &Poly) -> Poly {
 }
 
 /// Multiply two polynomials using NTT-based multiplication.
-///
-/// The inputs are in coefficient form. The function transforms both to NTT domain,
-/// performs pointwise multiplication, and transforms back. This achieves
-/// O(N log N) complexity instead of O(N^2) for schoolbook multiplication.
 pub fn poly_mul(a: &Poly, b: &Poly) -> Poly {
     let mut a_ntt = *a;
     let mut b_ntt = *b;
@@ -68,8 +62,7 @@ pub fn poly_mul(a: &Poly, b: &Poly) -> Poly {
     c
 }
 
-/// Multiply a polynomial by a scalar polynomial (used for challenge * secret).
-/// This is just poly_mul but named for clarity in the VRF evaluation context.
+/// Multiply a polynomial by a scalar polynomial.
 pub fn poly_scalar_mul(c: &Poly, s: &Poly) -> Poly {
     poly_mul(c, s)
 }
@@ -83,19 +76,23 @@ pub fn poly_neg(a: &Poly) -> Poly {
     c
 }
 
-/// Compute the infinity norm of a polynomial: max_i |a_i|.
+/// Computes the infinity norm of a polynomial in centered representation.
 ///
-/// # Timing Note
+/// # Timing
 ///
-/// This implementation is NOT constant-time with respect to the polynomial
-/// coefficients. For production use, replace callers with a fully audited
-/// constant-time implementation using bitwise arithmetic.
+/// This function is NOT constant-time with respect to the polynomial
+/// coefficients. For the rejection sampling decision in [`crate::eyvara_eval`],
+/// the polynomial being checked (`z`) contains a secret contribution from the
+/// secret key. Consequently, this function may leak information about the
+/// secret key through timing side channels on platforms where integer division
+/// or branching is not constant-time.
 ///
-/// TODO(VULN-03): migrate rejection checks to `infinity_norm_ct` after
-/// benchmarking and side-channel review on supported targets.
+/// This is a known limitation of the current research prototype. A production
+/// deployment must replace this function with a verified constant-time
+/// implementation.
 pub fn infinity_norm(a: &Poly) -> i64 {
     let mut max = 0i64;
-    for &coeff in a.iter() {
+    for &coeff in a {
         let mut c = coeff % Q;
         if c > Q / 2 {
             c -= Q;
@@ -113,10 +110,8 @@ pub fn infinity_norm(a: &Poly) -> i64 {
 
 /// Compute the infinity norm using arithmetic masking for data-dependent choices.
 ///
-/// This avoids explicit branches in the maximum and centered-representative
-/// selection logic. The `%` reductions may still compile to variable-latency
-/// division on some CPUs, so this function should be reviewed on each target
-/// before being treated as a production constant-time primitive.
+/// The `%` reductions may still compile to variable-latency division on some
+/// CPUs, so this function is not claimed as a production constant-time primitive.
 #[allow(clippy::cast_sign_loss)]
 pub fn infinity_norm_ct(poly: &Poly, q: i64) -> i64 {
     let mut max_val = 0_i64;
@@ -136,39 +131,40 @@ pub fn infinity_norm_ct(poly: &Poly, q: i64) -> i64 {
     max_val
 }
 
-/// Compute the infinity norm of a polynomial vector: max over all component norms.
+/// Compute the infinity norm of a polynomial vector.
 pub fn infinity_norm_vec(v: &[Poly]) -> i64 {
-    v.iter().map(|p| infinity_norm(p)).max().unwrap_or(0)
+    v.iter().map(infinity_norm).max().unwrap_or(0)
 }
 
 /// Add two polynomial vectors component-wise.
-pub fn poly_vec_add(a: &[Poly], b: &[Poly]) -> PolyVec {
-    assert_eq!(a.len(), b.len());
-    a.iter()
+pub fn poly_vec_add(a: &[Poly], b: &[Poly]) -> Result<PolyVec, EyvaraError> {
+    if a.len() != b.len() {
+        return Err(EyvaraError::MalformedProof);
+    }
+
+    Ok(a.iter()
         .zip(b.iter())
         .map(|(ai, bi)| poly_add(ai, bi))
-        .collect()
+        .collect())
 }
 
 /// Subtract two polynomial vectors component-wise.
-pub fn poly_vec_sub(a: &[Poly], b: &[Poly]) -> PolyVec {
-    assert_eq!(a.len(), b.len());
-    a.iter()
+pub fn poly_vec_sub(a: &[Poly], b: &[Poly]) -> Result<PolyVec, EyvaraError> {
+    if a.len() != b.len() {
+        return Err(EyvaraError::MalformedProof);
+    }
+
+    Ok(a.iter()
         .zip(b.iter())
         .map(|(ai, bi)| poly_sub(ai, bi))
-        .collect()
+        .collect())
 }
 
-/// Multiply a matrix A (in NTT domain) by a vector v, producing Av mod Q.
-///
-/// A is stored as a vector of rows, where each row is a vector of polynomials
-/// in NTT domain. The vector v is in coefficient form and is transformed to
-/// NTT domain internally.
+/// Multiply a matrix A in NTT domain by a coefficient-form vector v.
 pub fn poly_matrix_mul_ntt(a_ntt: &[Vec<Poly>], v: &[Poly]) -> PolyVec {
     let k = a_ntt.len();
     let mut result = vec![poly_zero(); k];
 
-    // Transform v to NTT domain
     let v_ntt: Vec<Poly> = v
         .iter()
         .map(|p| {
@@ -180,15 +176,15 @@ pub fn poly_matrix_mul_ntt(a_ntt: &[Vec<Poly>], v: &[Poly]) -> PolyVec {
 
     for i in 0..k {
         let mut acc = poly_zero();
-        for j in 0..v_ntt.len() {
-            let product = ntt_pointwise_mul(&a_ntt[i][j], &v_ntt[j]);
+        for (j, vj) in v_ntt.iter().enumerate() {
+            let product = ntt_pointwise_mul(&a_ntt[i][j], vj);
             for idx in 0..N {
                 acc[idx] += product[idx];
             }
         }
         ntt_inverse(&mut acc);
-        for idx in 0..N {
-            acc[idx] = reduce_coeff(acc[idx]);
+        for coeff in &mut acc {
+            *coeff = reduce_coeff(*coeff);
         }
         result[i] = acc;
     }
@@ -196,10 +192,6 @@ pub fn poly_matrix_mul_ntt(a_ntt: &[Vec<Poly>], v: &[Poly]) -> PolyVec {
 }
 
 /// Expand a seed rho into the public matrix A in NTT domain.
-///
-/// Each entry A[i][j] is generated by absorbing (DOMAIN_MATRIX || rho || i || j)
-/// into SHAKE-256 and rejection-sampling coefficients uniformly from [0, Q-1].
-/// The matrix is returned in NTT domain for efficient multiplication.
 pub fn expand_a(rho: &[u8; SEED_SIZE], k: usize) -> Vec<Vec<Poly>> {
     let mut a = vec![vec![poly_zero(); k]; k];
 
@@ -216,8 +208,6 @@ pub fn expand_a(rho: &[u8; SEED_SIZE], k: usize) -> Vec<Vec<Poly>> {
             while idx < N {
                 let mut buf = [0u8; 3];
                 reader.read(&mut buf);
-                // Rejection sampling: interpret 3 bytes as a 24-bit integer,
-                // mask to 23 bits, and accept if < Q.
                 let val = ((buf[0] as i64) | ((buf[1] as i64) << 8) | ((buf[2] as i64) << 16))
                     & 0x7F_FFFF;
                 if val < Q {
@@ -229,7 +219,6 @@ pub fn expand_a(rho: &[u8; SEED_SIZE], k: usize) -> Vec<Vec<Poly>> {
                 }
             }
 
-            // Store in NTT domain
             ntt_forward(&mut poly);
             a[i][j] = poly;
         }
@@ -237,51 +226,39 @@ pub fn expand_a(rho: &[u8; SEED_SIZE], k: usize) -> Vec<Vec<Poly>> {
     a
 }
 
-/// Sample a polynomial with coefficients from the centered binomial distribution
-/// with parameter eta.
-///
-/// The centered binomial distribution CBD(eta) produces values in {-eta, ..., eta}
-/// by computing the difference of two sums of eta uniform bits:
-///   c = sum(a_i) - sum(b_i) where a_i, b_i ~ Uniform({0,1}).
-///
-/// For eta=2: coefficients are in {-2, -1, 0, 1, 2} with probabilities
-/// {1/16, 4/16, 6/16, 4/16, 1/16}.
-pub fn sample_cbd<R: Rng>(rng: &mut R, eta: i64) -> Poly {
+/// Sample a polynomial with coefficients from the centered binomial distribution.
+pub fn sample_cbd<R: RngCore>(rng: &mut R, eta: i64) -> Poly {
     let mut poly = poly_zero();
     let eta_u = eta as u32;
 
-    for i in 0..N {
+    for coeff in &mut poly {
         let mut a_sum = 0i64;
         let mut b_sum = 0i64;
         for _ in 0..eta_u {
-            a_sum += (rng.gen::<u32>() & 1) as i64;
-            b_sum += (rng.gen::<u32>() & 1) as i64;
+            a_sum += (rng.next_u32() & 1) as i64;
+            b_sum += (rng.next_u32() & 1) as i64;
         }
-        poly[i] = a_sum - b_sum;
+        *coeff = a_sum - b_sum;
     }
     poly
 }
 
 /// Sample a polynomial vector with each component from CBD(eta).
-pub fn sample_cbd_vec<R: Rng>(rng: &mut R, k: usize, eta: i64) -> PolyVec {
+pub fn sample_cbd_vec<R: RngCore>(rng: &mut R, k: usize, eta: i64) -> PolyVec {
     (0..k).map(|_| sample_cbd(rng, eta)).collect()
 }
 
 /// Sample a polynomial with coefficients uniformly from [-gamma1+1, gamma1].
-///
-/// The masking vector y in the Fiat-Shamir with Aborts protocol is sampled
-/// from this distribution. The large range (gamma1 = 2^17 or 2^19) ensures
-/// that the response z = y + cs masks the secret contribution cs.
-pub fn sample_uniform_gamma1<R: Rng>(rng: &mut R, gamma1: i64) -> Poly {
+pub fn sample_uniform_gamma1<R: RngCore>(rng: &mut R, gamma1: i64) -> Poly {
     let mut poly = poly_zero();
     let range = 2 * gamma1;
-    for i in 0..N {
-        // Rejection sampling to avoid modular bias
-        let bound = (u64::MAX / range as u64) * range as u64;
+    let range_u64 = range as u64;
+    for coeff in &mut poly {
+        let bound = (u64::MAX / range_u64) * range_u64;
         loop {
-            let r = rng.gen::<u64>();
+            let r = rng.next_u64();
             if r < bound {
-                poly[i] = (r % range as u64) as i64 - gamma1 + 1;
+                *coeff = (r % range_u64) as i64 - gamma1 + 1;
                 break;
             }
         }
@@ -290,20 +267,11 @@ pub fn sample_uniform_gamma1<R: Rng>(rng: &mut R, gamma1: i64) -> Poly {
 }
 
 /// Sample a polynomial vector with each component uniform in [-gamma1+1, gamma1].
-pub fn sample_uniform_gamma1_vec<R: Rng>(rng: &mut R, k: usize, gamma1: i64) -> PolyVec {
+pub fn sample_uniform_gamma1_vec<R: RngCore>(rng: &mut R, k: usize, gamma1: i64) -> PolyVec {
     (0..k).map(|_| sample_uniform_gamma1(rng, gamma1)).collect()
 }
 
-// ── HighBits / LowBits / Hint Functions ─────────────────────────────
-
-/// Decompose a value r into (r1, r0) where r = r1 * (2*gamma2) + r0
-/// with r0 in [-(gamma2-1), gamma2].
-///
-/// This is the standard Dilithium decomposition. The high-order part r1
-/// determines the commitment that is hashed in the challenge, while the
-/// low-order part r0 carries the "noise" that is masked by rejection sampling.
 fn decompose(r: i64, gamma2: i64) -> (i64, i64) {
-    // Ensure r is in [0, Q-1]
     let r_pos = ((r % Q) + Q) % Q;
 
     let mut r0 = r_pos % (2 * gamma2);
@@ -312,23 +280,18 @@ fn decompose(r: i64, gamma2: i64) -> (i64, i64) {
     }
 
     if r_pos - r0 == Q - 1 {
-        // Special case: r1 would be (Q-1)/(2*gamma2) which is out of range
         (0, r0 - 1)
     } else {
         ((r_pos - r0) / (2 * gamma2), r0)
     }
 }
 
-/// Extract the high-order bits of a coefficient: HighBits(r, 2*gamma2).
-///
-/// Returns r1 such that r ≡ r1 * 2*gamma2 + r0 (mod Q) with |r0| ≤ gamma2.
+/// Extract the high-order bits of a coefficient.
 pub fn high_bits(r: i64, gamma2: i64) -> i64 {
     decompose(r, gamma2).0
 }
 
-/// Extract the low-order bits of a coefficient: LowBits(r, 2*gamma2).
-///
-/// Returns r0 such that r ≡ r1 * 2*gamma2 + r0 (mod Q) with |r0| ≤ gamma2.
+/// Extract the low-order bits of a coefficient.
 pub fn low_bits(r: i64, gamma2: i64) -> i64 {
     decompose(r, gamma2).1
 }
@@ -362,26 +325,13 @@ pub fn low_bits_vec(v: &[Poly], gamma2: i64) -> PolyVec {
 }
 
 /// Compute the hint bit for a single coefficient pair.
-///
-/// MakeHint(z, r, alpha) = 1 if HighBits(r, alpha) ≠ HighBits(r + z, alpha), else 0.
-///
-/// The hint allows the verifier to recover HighBits(r + z, alpha) from
-/// HighBits(r, alpha) and the hint bit, without knowing z.
 pub fn make_hint_coeff(z: i64, r: i64, gamma2: i64) -> i8 {
     let r1 = high_bits(r, gamma2);
     let v1 = high_bits(((r + z) % Q + Q) % Q, gamma2);
-    if r1 != v1 {
-        1
-    } else {
-        0
-    }
+    i8::from(r1 != v1)
 }
 
-/// Apply the hint to recover HighBits(r + z, alpha) from r and the hint.
-///
-/// UseHint(h, r, alpha):
-///   If h = 0: return HighBits(r, alpha)
-///   If h = 1: return HighBits(r, alpha) adjusted by ±1
+/// Apply the hint to recover high bits from a coefficient.
 pub fn use_hint_coeff(hint: i8, r: i64, gamma2: i64) -> i64 {
     let (r1, r0) = decompose(r, gamma2);
 
@@ -390,7 +340,6 @@ pub fn use_hint_coeff(hint: i8, r: i64, gamma2: i64) -> i64 {
     }
 
     let m = (Q - 1) / (2 * gamma2);
-
     if r0 > 0 {
         (r1 + 1) % m
     } else {
@@ -408,65 +357,65 @@ pub fn make_hint_poly(z: &Poly, r: &Poly, gamma2: i64) -> Vec<i8> {
 }
 
 /// Compute UseHint for an entire polynomial with hint vector.
-pub fn use_hint_poly(hints: &[i8], r: &Poly, gamma2: i64) -> Poly {
+pub fn use_hint_poly(hints: &[i8], r: &Poly, gamma2: i64) -> Result<Poly, EyvaraError> {
+    if hints.len() != N {
+        return Err(EyvaraError::MalformedProof);
+    }
+
     let mut result = poly_zero();
     for i in 0..N {
         result[i] = use_hint_coeff(hints[i], r[i], gamma2);
     }
-    result
+    Ok(result)
 }
 
 /// Compute MakeHint for polynomial vectors.
-///
-/// Returns a flattened hint vector of length k*N and the total number of 1-bits (hint weight).
-pub fn make_hint_vec(z: &[Poly], r: &[Poly], gamma2: i64) -> (Vec<i8>, usize) {
-    let k = z.len();
-    let mut hints = Vec::with_capacity(k * N);
+pub fn make_hint_vec(z: &[Poly], r: &[Poly], gamma2: i64) -> Result<(Vec<i8>, usize), EyvaraError> {
+    if z.len() != r.len() {
+        return Err(EyvaraError::MalformedProof);
+    }
+
+    let mut hints = Vec::with_capacity(z.len() * N);
     let mut weight = 0usize;
-    for i in 0..k {
-        let h = make_hint_poly(&z[i], &r[i], gamma2);
-        for &bit in &h {
-            if bit != 0 {
-                weight += 1;
-            }
-        }
+    for (zi, ri) in z.iter().zip(r.iter()) {
+        let h = make_hint_poly(zi, ri, gamma2);
+        weight += h.iter().filter(|&&bit| bit != 0).count();
         hints.extend_from_slice(&h);
     }
-    (hints, weight)
+    Ok((hints, weight))
 }
 
 /// Compute UseHint for polynomial vectors.
-///
-/// The hint vector is flattened (length k*N), and k is inferred from the
-/// length of the polynomial vector r.
-pub fn use_hint_vec(hints: &[i8], r: &[Poly], gamma2: i64) -> PolyVec {
+pub fn use_hint_vec(hints: &[i8], r: &[Poly], gamma2: i64) -> Result<PolyVec, EyvaraError> {
     let k = r.len();
-    assert_eq!(hints.len(), k * N);
+    if hints.len() != k * N {
+        return Err(EyvaraError::MalformedProof);
+    }
+
     let mut result = vec![poly_zero(); k];
     for i in 0..k {
         let h_slice = &hints[i * N..(i + 1) * N];
-        result[i] = use_hint_poly(h_slice, &r[i], gamma2);
+        result[i] = use_hint_poly(h_slice, &r[i], gamma2)?;
     }
-    result
+    Ok(result)
 }
 
-/// Count the number of nonzero entries in a hint vector (Hamming weight).
+/// Count the number of nonzero entries in a hint vector.
 pub fn hint_weight(hints: &[i8]) -> usize {
     hints.iter().filter(|&&h| h != 0).count()
 }
 
-/// Serialize a polynomial's coefficients to bytes (for hashing).
-/// Each coefficient is stored as a 4-byte little-endian signed integer.
+/// Serialize a polynomial's coefficients to bytes for hashing.
 pub fn poly_to_bytes(p: &Poly) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(N * 4);
-    for &c in p.iter() {
+    for &c in p {
         let c_pos = ((c % Q) + Q) % Q;
         bytes.extend_from_slice(&(c_pos as u32).to_le_bytes());
     }
     bytes
 }
 
-/// Serialize a polynomial vector to bytes.
+/// Serialize a polynomial vector to bytes for hashing.
 pub fn poly_vec_to_bytes(v: &[Poly]) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(v.len() * N * 4);
     for p in v {
@@ -475,11 +424,30 @@ pub fn poly_vec_to_bytes(v: &[Poly]) -> Vec<u8> {
     bytes
 }
 
+#[cfg(feature = "serde")]
+pub(crate) fn polyvec_to_nested_vec(v: &PolyVec) -> Vec<Vec<i64>> {
+    v.iter().map(|p| p.to_vec()).collect()
+}
+
+#[cfg(feature = "serde")]
+pub(crate) fn nested_vec_to_polyvec(v: Vec<Vec<i64>>) -> Result<PolyVec, String> {
+    let mut out = Vec::with_capacity(v.len());
+    for poly in v {
+        if poly.len() != N {
+            return Err(format!("polynomial length must be {N}"));
+        }
+        let mut arr = [0_i64; N];
+        arr.copy_from_slice(&poly);
+        out.push(arr);
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::params::EYVARA_128;
-    use rand::{Rng, SeedableRng};
+    use crate::params::{EYVARA_128, SEED_SIZE};
+    use rand::SeedableRng;
     use rand_chacha::ChaCha20Rng;
 
     #[test]
@@ -498,57 +466,42 @@ mod tests {
     fn test_high_low_bits_reconstruction() {
         let mut rng = ChaCha20Rng::seed_from_u64(42);
         let p = sample_uniform_gamma1_vec(&mut rng, 1, 1000)[0];
-        let gamma2 = EYVARA_128.gamma2;
+        let gamma2 = EYVARA_128.gamma_2();
 
         let w1 = high_bits_poly(&p, gamma2);
         let w0 = low_bits_poly(&p, gamma2);
 
-        // Check bounds on low bits
-        for &coeff in w0.iter() {
+        for &coeff in &w0 {
             assert!(coeff.abs() <= gamma2);
         }
 
-        // Reconstruct and verify
-        // HighBits(r, 2*gamma2) * 2*gamma2 + LowBits(r, 2*gamma2) = r mod q
         for i in 0..N {
             let reconstructed = w1[i] * 2 * gamma2 + w0[i];
             let diff = crate::ntt::reduce_coeff(p[i] - reconstructed);
-            assert_eq!(diff, 0, "Reconstruction failed at index {}", i);
+            assert_eq!(diff, 0, "Reconstruction failed at index {i}");
         }
     }
 
     #[test]
-    fn test_make_use_hint_roundtrip() {
-        let gamma2 = EYVARA_128.gamma2;
+    fn test_make_use_hint_roundtrip_smoke() {
+        let gamma2 = EYVARA_128.gamma_2();
         let mut rng = ChaCha20Rng::seed_from_u64(99);
 
         for _ in 0..100 {
-            let r: i64 = (rng.gen::<u64>() % Q as u64) as i64;
-            let z: i64 = (rng.gen::<u64>() % (2 * gamma2 as u64)) as i64 - gamma2;
-
+            let r: i64 = (rng.next_u64() % Q as u64) as i64;
+            let z: i64 = (rng.next_u64() % (2 * gamma2 as u64)) as i64 - gamma2;
             let hint = make_hint_coeff(z, r, gamma2);
-            let r1_recovered = use_hint_coeff(hint, ((r + z) % Q + Q) % Q, gamma2);
-            let r1_original = high_bits(((r + z) % Q + Q) % Q, gamma2);
-
-            // UseHint should recover the same high bits
-            // (Note: the relationship is that UseHint(h, r, gamma2) gives the
-            //  correct HighBits when h = MakeHint(z, r-z, gamma2) and input is r)
-            // The exact semantics follow the Dilithium spec
-            let _ = (r1_recovered, r1_original); // used for debugging
+            let _ = use_hint_coeff(hint, ((r + z) % Q + Q) % Q, gamma2);
         }
     }
 
     #[test]
     fn test_sample_uniform_gamma1_bounds() {
         let mut rng = ChaCha20Rng::seed_from_u64(7);
-        let gamma1 = EYVARA_128.gamma1;
+        let gamma1 = EYVARA_128.gamma_1();
         let p = sample_uniform_gamma1(&mut rng, gamma1);
-        for &c in p.iter() {
-            assert!(
-                c >= -gamma1 + 1 && c <= gamma1,
-                "coefficient {} out of range",
-                c
-            );
+        for &c in &p {
+            assert!(c > -gamma1 && c <= gamma1, "coefficient {c} out of range");
         }
     }
 
@@ -559,8 +512,16 @@ mod tests {
         let a2 = expand_a(&rho, 2);
         for i in 0..2 {
             for j in 0..2 {
-                assert_eq!(a1[i][j], a2[i][j], "A[{}][{}] differs", i, j);
+                assert_eq!(a1[i][j], a2[i][j], "A[{i}][{j}] differs");
             }
         }
+    }
+
+    #[test]
+    fn test_vector_length_mismatch_returns_error() {
+        let a = vec![poly_zero()];
+        let b = vec![poly_zero(), poly_zero()];
+        assert_eq!(poly_vec_add(&a, &b), Err(EyvaraError::MalformedProof));
+        assert_eq!(poly_vec_sub(&a, &b), Err(EyvaraError::MalformedProof));
     }
 }

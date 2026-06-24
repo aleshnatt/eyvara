@@ -1,101 +1,69 @@
 # eyvara_vrf
 
-Post-quantum lattice-based Verifiable Random Function (VRF) from Module-LWE with tight uniqueness in the Quantum Random Oracle Model.
-
 [![Crates.io](https://img.shields.io/crates/v/eyvara_vrf.svg)](https://crates.io/crates/eyvara_vrf)
 [![docs.rs](https://img.shields.io/docsrs/eyvara_vrf)](https://docs.rs/eyvara_vrf)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)]()
 
-## Overview
+## What is a VRF
 
-A verifiable random function lets a secret-key holder compute a pseudorandom output for an input and publish a proof that anyone can verify with the public key. Verification checks both the proof and the claimed output, so a valid proof binds the input to one public VRF value.
+A verifiable random function (VRF) lets a secret-key holder compute a deterministic pseudorandom output for an input and publish a proof that anyone can verify with the corresponding public key. For a fixed secret key and input, the output is unique; without the secret key, it should be computationally infeasible to predict the output before seeing a valid proof.
 
-Eyvara is a research implementation of a lattice-based VRF built from Module-LWE using Fiat-Shamir with Aborts. Its proof follows a Dilithium-style commitment, challenge, response, and hint structure so the verifier can recover the high bits of the commitment and recompute the expected output.
-
-Post-quantum VRFs are intended for settings where classical elliptic-curve assumptions are not acceptable. This crate provides reference parameter sets targeting 128-bit and 192-bit classical security levels for experimentation and review.
+Post-quantum VRFs target deployments where long-term security should not depend on classical elliptic-curve assumptions. Eyvara is a lattice-based construction from Module-LWE, intended as a research implementation for experimentation, review, and comparison.
 
 ## Security Notice
 
-This crate is a research prototype. It is not audited for production deployment and should not be used in security-critical systems without an independent professional cryptographic review.
+This crate is a research prototype accompanying the paper: "Eyvara: A Lattice-Based Verifiable Random Function from Module-LWE with Tight Uniqueness in the Quantum Random Oracle Model". It has not received a professional cryptographic audit.
 
-The current implementation addresses audit findings for output binding (VULN-01), zeroization of evaluation intermediates (VULN-02), and documented timing risk around coefficient norm computation with a constant-time-oriented alternative (VULN-03). These remediations do not replace a full implementation and protocol audit.
+Known limitations:
+
+- `infinity_norm` is not constant-time (see VULN-03 in audit).
+- The rejection sampling loop timing is input-dependent.
+
+Do not use in systems where side-channel resistance is required.
 
 ## Quick Start
 
 ```rust
-use eyvara_vrf::{eyvara_eval, eyvara_keygen, eyvara_verify, EYVARA_128};
-use rand::SeedableRng;
-use rand_chacha::ChaCha20Rng;
+use eyvara_vrf::{eyvara_eval, eyvara_keygen, eyvara_verify, EyvaraError};
+use eyvara_vrf::params::EYVARA_128;
+use rand::rngs::OsRng;
 
-let mut rng = ChaCha20Rng::seed_from_u64(42);
-let (pk, sk) = eyvara_keygen(&EYVARA_128, &mut rng);
-
-let input = b"example input";
-let (output, proof) = eyvara_eval(&EYVARA_128, &sk, input, &mut rng)
-    .expect("evaluation should succeed");
-
-assert!(eyvara_verify(&EYVARA_128, &pk, input, &output, &proof));
+fn main() -> Result<(), EyvaraError> {
+    let mut rng = OsRng;
+    let (pk, sk) = eyvara_keygen(&EYVARA_128, &mut rng);
+    let input = b"my application input";
+    let (output, proof) = eyvara_eval(&EYVARA_128, &sk, input, &mut rng)?;
+    let valid = eyvara_verify(&EYVARA_128, &pk, input, &output, &proof)?;
+    assert!(valid);
+    Ok(())
+}
 ```
 
 ## Parameter Sets
 
-| Parameter set | n | k | q | Security level |
-|---|---:|---:|---:|---|
-| `EYVARA_128` | 256 | 2 | 8,380,417 | 128-bit classical |
-| `EYVARA_192` | 256 | 3 | 8,380,417 | 192-bit classical |
+| Name | Security Level | n | k | q | Proof Size |
+|------|---------------|---|---|---|------------|
+| EYVARA_128 | NIST Cat. 1 (~128-bit classical) | 256 | 2 | 8380417 | ~1.3 KB |
+| EYVARA_192 | NIST Cat. 3 (~192-bit classical) | 256 | 3 | 8380417 | ~2.0 KB |
 
-## Features
+## Optional Features
 
-The crate has no default optional features.
-
-Enable `serde` to derive `Serialize` and `Deserialize` for public parameter metadata:
+The `serde` feature enables `Serialize` and `Deserialize` for `PublicKey`, `EyvaraProof`, and `EyvaraOutput`. `SecretKey` supports `Serialize` only, so explicit key import from untrusted data is not provided by this crate.
 
 ```toml
-eyvara_vrf = { version = "0.1.0", features = ["serde"] }
+eyvara_vrf = { version = "0.1", features = ["serde"] }
 ```
 
-Enable `hex` when downstream applications want the optional dependency available for encoding integration:
-
-```toml
-eyvara_vrf = { version = "0.1.0", features = ["hex"] }
-```
-
-## Installation
-
-```toml
-[dependencies]
-eyvara_vrf = "0.1.0"
-```
-
-## Building
+## Building, Testing, Benchmarking
 
 ```sh
 cargo build --release
-```
-
-The pre-publish checklist is available as an executable script:
-
-```sh
-./scripts/pre_publish.sh
-```
-
-## Testing
-
-```sh
 cargo test
 cargo test --doc
-```
-
-## Benchmarks
-
-```sh
+cargo test --features serde
 cargo bench
 ```
 
-## Paper
-
-Eyvara: A Post-Quantum Lattice-Based Verifiable Random Function from Module-LWE. An IACR ePrint link will be added when available. This crate is the reference implementation.
-
 ## License
 
-Licensed under MIT OR Apache-2.0.
+MIT OR Apache-2.0

@@ -1,5 +1,6 @@
 //! Integration test suite for the Eyvara VRF.
 
+use crate::error::EyvaraError;
 use crate::eval::{eyvara_eval, EyvaraOutput};
 use crate::keygen::eyvara_keygen;
 use crate::params::{EYVARA_128, EYVARA_192, N, OUTPUT_SIZE};
@@ -8,7 +9,7 @@ use crate::verify::eyvara_verify;
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
 
-/// Test that evaluation followed by verification succeeds for `EYVARA_128`.
+/// Tests use deterministic RNGs only for reproducibility.
 #[test]
 fn test_correctness_eyvara_128() {
     let mut rng = ChaCha20Rng::seed_from_u64(12_345);
@@ -16,33 +17,29 @@ fn test_correctness_eyvara_128() {
 
     for i in 0..5 {
         let input = format!("correctness_test_{i}");
-        let (beta, proof) = eyvara_eval(&EYVARA_128, &sk, input.as_bytes(), &mut rng)
-            .expect("evaluation should succeed");
+        let (beta, proof) = eyvara_eval(&EYVARA_128, &sk, input.as_bytes(), &mut rng).unwrap();
 
         assert!(
-            eyvara_verify(&EYVARA_128, &pk, input.as_bytes(), &beta, &proof),
+            eyvara_verify(&EYVARA_128, &pk, input.as_bytes(), &beta, &proof).unwrap(),
             "verification should succeed for input '{input}'"
         );
     }
 }
 
-/// Test that evaluation followed by verification succeeds for `EYVARA_192`.
 #[test]
 fn test_correctness_eyvara_192() {
     let mut rng = ChaCha20Rng::seed_from_u64(54_321);
     let (pk, sk) = eyvara_keygen(&EYVARA_192, &mut rng);
 
     let input = b"eyvara_192_correctness";
-    let (beta, proof) =
-        eyvara_eval(&EYVARA_192, &sk, input, &mut rng).expect("evaluation should succeed");
+    let (beta, proof) = eyvara_eval(&EYVARA_192, &sk, input, &mut rng).unwrap();
 
     assert!(
-        eyvara_verify(&EYVARA_192, &pk, input, &beta, &proof),
+        eyvara_verify(&EYVARA_192, &pk, input, &beta, &proof).unwrap(),
         "EYVARA_192 verification should succeed"
     );
 }
 
-/// Test that verification fails when using a different public key.
 #[test]
 fn test_wrong_key() {
     let mut rng = ChaCha20Rng::seed_from_u64(42);
@@ -52,26 +49,24 @@ fn test_wrong_key() {
     let mut rng2 = ChaCha20Rng::seed_from_u64(77);
     let (pk2, _) = eyvara_keygen(&EYVARA_128, &mut rng2);
 
-    assert!(
-        !eyvara_verify(&EYVARA_128, &pk2, b"wrong_key_test", &beta, &proof),
-        "verification should fail with a different public key"
+    assert_eq!(
+        eyvara_verify(&EYVARA_128, &pk2, b"wrong_key_test", &beta, &proof),
+        Err(EyvaraError::ChallengeMismatch)
     );
 }
 
-/// Test that verification fails when the input is altered.
 #[test]
 fn test_wrong_input() {
     let mut rng = ChaCha20Rng::seed_from_u64(42);
     let (pk, sk) = eyvara_keygen(&EYVARA_128, &mut rng);
     let (beta, proof) = eyvara_eval(&EYVARA_128, &sk, b"original_input", &mut rng).unwrap();
 
-    assert!(
-        !eyvara_verify(&EYVARA_128, &pk, b"modified_input", &beta, &proof),
-        "verification should fail with a different input"
+    assert_eq!(
+        eyvara_verify(&EYVARA_128, &pk, b"modified_input", &beta, &proof),
+        Err(EyvaraError::ChallengeMismatch)
     );
 }
 
-/// Test that verification fails when a single bit of the proof is flipped.
 #[test]
 fn test_tampered_proof() {
     let mut rng = ChaCha20Rng::seed_from_u64(42);
@@ -81,56 +76,49 @@ fn test_tampered_proof() {
 
     let mut tampered = proof.clone();
     tampered.c_tilde[0] ^= 0xFF;
-    assert!(!eyvara_verify(&EYVARA_128, &pk, input, &beta, &tampered));
+    assert_eq!(
+        eyvara_verify(&EYVARA_128, &pk, input, &beta, &tampered),
+        Err(EyvaraError::ChallengeMismatch)
+    );
 
     let mut tampered = proof.clone();
     tampered.z[0][0] = tampered.z[0][0].wrapping_add(1);
-    assert!(!eyvara_verify(&EYVARA_128, &pk, input, &beta, &tampered));
+    assert!(eyvara_verify(&EYVARA_128, &pk, input, &beta, &tampered).is_err());
 
     let mut tampered = proof;
     tampered.h[0] ^= 1;
-    assert!(!eyvara_verify(&EYVARA_128, &pk, input, &beta, &tampered));
+    assert!(eyvara_verify(&EYVARA_128, &pk, input, &beta, &tampered).is_err());
 }
 
-/// Test that a tampered VRF output is rejected.
 #[test]
 fn test_tampered_output_rejected() {
     let mut rng = ChaCha20Rng::seed_from_u64(42);
     let (pk, sk) = eyvara_keygen(&EYVARA_128, &mut rng);
     let input = b"tampered_output";
-    let (output, proof) = eyvara_eval(&EYVARA_128, &sk, input, &mut rng).unwrap();
+    let (mut output, proof) = eyvara_eval(&EYVARA_128, &sk, input, &mut rng).unwrap();
 
-    let mut tampered_output = output;
-    tampered_output[0] ^= 1;
+    output[0] ^= 1;
 
-    assert!(!eyvara_verify(
-        &EYVARA_128,
-        &pk,
-        input,
-        &tampered_output,
-        &proof
-    ));
+    assert_eq!(
+        eyvara_verify(&EYVARA_128, &pk, input, &output, &proof),
+        Err(EyvaraError::OutputMismatch)
+    );
 }
 
-/// Test that an all-zero VRF output is rejected.
 #[test]
 fn test_wrong_output_all_zeros() {
     let mut rng = ChaCha20Rng::seed_from_u64(43);
     let (pk, sk) = eyvara_keygen(&EYVARA_128, &mut rng);
     let input = b"zero_output";
     let (_output, proof) = eyvara_eval(&EYVARA_128, &sk, input, &mut rng).unwrap();
-    let zero_output: EyvaraOutput = [0_u8; 64];
+    let zero_output = EyvaraOutput([0_u8; OUTPUT_SIZE]);
 
-    assert!(!eyvara_verify(
-        &EYVARA_128,
-        &pk,
-        input,
-        &zero_output,
-        &proof
-    ));
+    assert_eq!(
+        eyvara_verify(&EYVARA_128, &pk, input, &zero_output, &proof),
+        Err(EyvaraError::OutputMismatch)
+    );
 }
 
-/// Compile-time check that `ZeroizingPoly` can be instantiated and dropped.
 #[test]
 fn test_zeroize_compiles() {
     let mut poly = [0_i64; N];
@@ -138,7 +126,6 @@ fn test_zeroize_compiles() {
     let _wrapped = ZeroizingPoly(poly);
 }
 
-/// Test that evaluation completes within `MAX_ATTEMPTS` for many inputs.
 #[test]
 fn test_rejection_sampling_terminates() {
     let mut rng = ChaCha20Rng::seed_from_u64(42);
@@ -148,13 +135,12 @@ fn test_rejection_sampling_terminates() {
         let input = format!("rejection_test_{i}");
         let result = eyvara_eval(&EYVARA_128, &sk, input.as_bytes(), &mut rng);
         assert!(
-            result.is_some(),
+            result.is_ok(),
             "evaluation should complete for input '{input}'"
         );
     }
 }
 
-/// Basic sanity check that output bytes are not obviously degenerate.
 #[test]
 fn test_output_is_uniform_looking() {
     let mut rng = ChaCha20Rng::seed_from_u64(42);
@@ -166,7 +152,7 @@ fn test_output_is_uniform_looking() {
     for i in 0..num_samples {
         let input = format!("uniformity_test_{i}");
         let (beta, _) = eyvara_eval(&EYVARA_128, &sk, input.as_bytes(), &mut rng).unwrap();
-        for &b in &beta {
+        for &b in beta.as_ref() {
             byte_counts[usize::from(b)] += 1;
         }
     }
@@ -184,7 +170,6 @@ fn test_output_is_uniform_looking() {
     );
 }
 
-/// Test that the proof z-vector norm is properly bounded after evaluation.
 #[test]
 fn test_proof_norm_bounds() {
     let mut rng = ChaCha20Rng::seed_from_u64(42);
@@ -203,9 +188,8 @@ fn test_proof_norm_bounds() {
     }
 }
 
-/// Test that verification rejects proofs with invalid structural properties.
 #[test]
-fn test_verify_rejects_malformed_proof() {
+fn test_malformed_proof_returns_err() {
     let mut rng = ChaCha20Rng::seed_from_u64(42);
     let (pk, sk) = eyvara_keygen(&EYVARA_128, &mut rng);
     let input = b"malformed_test";
@@ -213,18 +197,40 @@ fn test_verify_rejects_malformed_proof() {
 
     let mut bad = proof.clone();
     bad.z.push([0_i64; N]);
-    assert!(!eyvara_verify(&EYVARA_128, &pk, input, &beta, &bad));
+    assert_eq!(
+        eyvara_verify(&EYVARA_128, &pk, input, &beta, &bad),
+        Err(EyvaraError::MalformedProof)
+    );
 
     let mut bad = proof.clone();
     bad.h.push(0);
-    assert!(!eyvara_verify(&EYVARA_128, &pk, input, &beta, &bad));
+    assert_eq!(
+        eyvara_verify(&EYVARA_128, &pk, input, &beta, &bad),
+        Err(EyvaraError::MalformedProof)
+    );
 
     let mut bad = proof;
     bad.h[0] = 2;
-    assert!(!eyvara_verify(&EYVARA_128, &pk, input, &beta, &bad));
+    assert_eq!(
+        eyvara_verify(&EYVARA_128, &pk, input, &beta, &bad),
+        Err(EyvaraError::MalformedProof)
+    );
 }
 
-/// Test that empty input works correctly.
+#[test]
+fn test_malformed_pubkey_returns_err() {
+    let mut rng = ChaCha20Rng::seed_from_u64(42);
+    let (mut pk, sk) = eyvara_keygen(&EYVARA_128, &mut rng);
+    let input = b"malformed_public_key";
+    let (beta, proof) = eyvara_eval(&EYVARA_128, &sk, input, &mut rng).unwrap();
+
+    pk.t.pop();
+    assert_eq!(
+        eyvara_verify(&EYVARA_128, &pk, input, &beta, &proof),
+        Err(EyvaraError::MalformedPublicKey)
+    );
+}
+
 #[test]
 fn test_empty_input() {
     let mut rng = ChaCha20Rng::seed_from_u64(42);
@@ -233,10 +239,9 @@ fn test_empty_input() {
     let input = b"";
     let (beta, proof) = eyvara_eval(&EYVARA_128, &sk, input, &mut rng).unwrap();
 
-    assert!(eyvara_verify(&EYVARA_128, &pk, input, &beta, &proof));
+    assert!(eyvara_verify(&EYVARA_128, &pk, input, &beta, &proof).unwrap());
 }
 
-/// Test with a very long input.
 #[test]
 fn test_long_input() {
     let mut rng = ChaCha20Rng::seed_from_u64(42);
@@ -245,5 +250,31 @@ fn test_long_input() {
     let input = vec![0xAB_u8; 10_000];
     let (beta, proof) = eyvara_eval(&EYVARA_128, &sk, &input, &mut rng).unwrap();
 
-    assert!(eyvara_verify(&EYVARA_128, &pk, &input, &beta, &proof));
+    assert!(eyvara_verify(&EYVARA_128, &pk, &input, &beta, &proof).unwrap());
+}
+
+#[cfg(feature = "serde")]
+#[test]
+fn test_serde_roundtrip_type_coverage() {
+    fn assert_public_key<T>()
+    where
+        T: serde::Serialize + for<'de> serde::Deserialize<'de>,
+    {
+    }
+
+    fn assert_proof<T>()
+    where
+        T: serde::Serialize + for<'de> serde::Deserialize<'de>,
+    {
+    }
+
+    fn assert_output<T>()
+    where
+        T: serde::Serialize + for<'de> serde::Deserialize<'de>,
+    {
+    }
+
+    assert_public_key::<crate::keygen::PublicKey>();
+    assert_proof::<crate::eval::EyvaraProof>();
+    assert_output::<EyvaraOutput>();
 }
