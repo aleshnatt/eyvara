@@ -3,20 +3,19 @@
 /// Errors that can occur during Eyvara VRF operations.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EyvaraError {
-    /// A proof field has an unexpected length or structure.
+    /// Proof structure is invalid.
     MalformedProof,
-    /// The public key has an unexpected structure.
+    /// Public key structure is invalid.
     MalformedPublicKey,
-    /// The hint weight exceeds the allowed maximum.
+    /// Hint weight exceeds omega.
     HintWeightExceeded,
-    /// The response norm exceeds the allowed bound.
+    /// Response norm exceeds the bound.
     NormBoundExceeded,
-    /// The Fiat-Shamir challenge did not match.
+    /// Fiat-Shamir challenge mismatch.
     ChallengeMismatch,
-    /// The VRF output did not match the proof commitment.
+    /// Output does not match the proof.
     OutputMismatch,
-    /// Key generation or evaluation exhausted the maximum number of
-    /// rejection sampling attempts without producing a valid proof.
+    /// Rejection sampling exhausted all attempts.
     RejectionSamplingFailed,
 }
 

@@ -9,9 +9,9 @@ use crate::verify::eyvara_verify;
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
 
-/// Tests use deterministic RNGs only for reproducibility.
 #[test]
 fn test_correctness_eyvara_128() {
+    // Seeded for determinism; real usage requires OsRng.
     let mut rng = ChaCha20Rng::seed_from_u64(12_345);
     let (pk, sk) = eyvara_keygen(&EYVARA_128, &mut rng);
 
@@ -28,6 +28,7 @@ fn test_correctness_eyvara_128() {
 
 #[test]
 fn test_correctness_eyvara_192() {
+    // Seeded for determinism; real usage requires OsRng.
     let mut rng = ChaCha20Rng::seed_from_u64(54_321);
     let (pk, sk) = eyvara_keygen(&EYVARA_192, &mut rng);
 
@@ -42,10 +43,12 @@ fn test_correctness_eyvara_192() {
 
 #[test]
 fn test_wrong_key() {
+    // Seeded for determinism; real usage requires OsRng.
     let mut rng = ChaCha20Rng::seed_from_u64(42);
     let (_, sk1) = eyvara_keygen(&EYVARA_128, &mut rng);
     let (beta, proof) = eyvara_eval(&EYVARA_128, &sk1, b"wrong_key_test", &mut rng).unwrap();
 
+    // Seeded for determinism; real usage requires OsRng.
     let mut rng2 = ChaCha20Rng::seed_from_u64(77);
     let (pk2, _) = eyvara_keygen(&EYVARA_128, &mut rng2);
 
@@ -57,6 +60,7 @@ fn test_wrong_key() {
 
 #[test]
 fn test_wrong_input() {
+    // Seeded for determinism; real usage requires OsRng.
     let mut rng = ChaCha20Rng::seed_from_u64(42);
     let (pk, sk) = eyvara_keygen(&EYVARA_128, &mut rng);
     let (beta, proof) = eyvara_eval(&EYVARA_128, &sk, b"original_input", &mut rng).unwrap();
@@ -69,6 +73,7 @@ fn test_wrong_input() {
 
 #[test]
 fn test_tampered_proof() {
+    // Seeded for determinism; real usage requires OsRng.
     let mut rng = ChaCha20Rng::seed_from_u64(42);
     let (pk, sk) = eyvara_keygen(&EYVARA_128, &mut rng);
     let input = b"tamper_test";
@@ -92,6 +97,7 @@ fn test_tampered_proof() {
 
 #[test]
 fn test_tampered_output_rejected() {
+    // Seeded for determinism; real usage requires OsRng.
     let mut rng = ChaCha20Rng::seed_from_u64(42);
     let (pk, sk) = eyvara_keygen(&EYVARA_128, &mut rng);
     let input = b"tampered_output";
@@ -107,6 +113,7 @@ fn test_tampered_output_rejected() {
 
 #[test]
 fn test_wrong_output_all_zeros() {
+    // Seeded for determinism; real usage requires OsRng.
     let mut rng = ChaCha20Rng::seed_from_u64(43);
     let (pk, sk) = eyvara_keygen(&EYVARA_128, &mut rng);
     let input = b"zero_output";
@@ -128,6 +135,7 @@ fn test_zeroize_compiles() {
 
 #[test]
 fn test_rejection_sampling_terminates() {
+    // Seeded for determinism; real usage requires OsRng.
     let mut rng = ChaCha20Rng::seed_from_u64(42);
     let (_, sk) = eyvara_keygen(&EYVARA_128, &mut rng);
 
@@ -143,6 +151,7 @@ fn test_rejection_sampling_terminates() {
 
 #[test]
 fn test_output_is_uniform_looking() {
+    // Seeded for determinism; real usage requires OsRng.
     let mut rng = ChaCha20Rng::seed_from_u64(42);
     let (_, sk) = eyvara_keygen(&EYVARA_128, &mut rng);
 
@@ -172,6 +181,7 @@ fn test_output_is_uniform_looking() {
 
 #[test]
 fn test_proof_norm_bounds() {
+    // Seeded for determinism; real usage requires OsRng.
     let mut rng = ChaCha20Rng::seed_from_u64(42);
     let (_, sk) = eyvara_keygen(&EYVARA_128, &mut rng);
 
@@ -190,6 +200,7 @@ fn test_proof_norm_bounds() {
 
 #[test]
 fn test_malformed_proof_returns_err() {
+    // Seeded for determinism; real usage requires OsRng.
     let mut rng = ChaCha20Rng::seed_from_u64(42);
     let (pk, sk) = eyvara_keygen(&EYVARA_128, &mut rng);
     let input = b"malformed_test";
@@ -219,6 +230,7 @@ fn test_malformed_proof_returns_err() {
 
 #[test]
 fn test_malformed_pubkey_returns_err() {
+    // Seeded for determinism; real usage requires OsRng.
     let mut rng = ChaCha20Rng::seed_from_u64(42);
     let (mut pk, sk) = eyvara_keygen(&EYVARA_128, &mut rng);
     let input = b"malformed_public_key";
@@ -233,6 +245,7 @@ fn test_malformed_pubkey_returns_err() {
 
 #[test]
 fn test_empty_input() {
+    // Seeded for determinism; real usage requires OsRng.
     let mut rng = ChaCha20Rng::seed_from_u64(42);
     let (pk, sk) = eyvara_keygen(&EYVARA_128, &mut rng);
 
@@ -244,6 +257,7 @@ fn test_empty_input() {
 
 #[test]
 fn test_long_input() {
+    // Seeded for determinism; real usage requires OsRng.
     let mut rng = ChaCha20Rng::seed_from_u64(42);
     let (pk, sk) = eyvara_keygen(&EYVARA_128, &mut rng);
 

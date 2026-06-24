@@ -37,13 +37,12 @@ pub fn sample_in_ball(seed: &[u8; CHALLENGE_SEED_SIZE], tau: usize) -> Poly {
     hasher.update(seed);
     let mut reader = hasher.finalize_xof();
 
-    // Read 8 bytes for sign bits
     let mut sign_buf = [0u8; 8];
     reader.read(&mut sign_buf);
     let mut signs = u64::from_le_bytes(sign_buf);
 
     for i in (N - tau)..N {
-        // Rejection sampling for j in [0, i]
+        // Rejection sampling keeps positions unbiased over [0, i].
         let j = loop {
             let mut buf = [0u8; 1];
             reader.read(&mut buf);
@@ -53,10 +52,8 @@ pub fn sample_in_ball(seed: &[u8; CHALLENGE_SEED_SIZE], tau: usize) -> Poly {
             }
         };
 
-        // Swap c[i] and c[j]
         c[i] = c[j];
 
-        // Set c[j] based on sign bit: +1 if bit is 0, -1 if bit is 1
         c[j] = if signs & 1 == 0 { 1 } else { -1 };
         signs >>= 1;
     }

@@ -19,7 +19,8 @@ pub type Poly = [i64; N];
 /// A vector of polynomials, representing an element of `R_q^k`.
 pub type PolyVec = Vec<Poly>;
 
-/// Polynomial wrapper that zeroizes coefficients when dropped.
+/// A polynomial that is zeroized when dropped.
+/// Use for intermediate secret values in [`crate::eyvara_eval`].
 pub struct ZeroizingPoly(pub Poly);
 
 impl Drop for ZeroizingPoly {
@@ -86,10 +87,7 @@ pub fn poly_neg(a: &Poly) -> Poly {
 /// secret key. Consequently, this function may leak information about the
 /// secret key through timing side channels on platforms where integer division
 /// or branching is not constant-time.
-///
-/// This is a known limitation of the current research prototype. A production
-/// deployment must replace this function with a verified constant-time
-/// implementation.
+
 pub fn infinity_norm(a: &Poly) -> i64 {
     let mut max = 0i64;
     for &coeff in a {
@@ -452,6 +450,7 @@ mod tests {
 
     #[test]
     fn test_poly_add_sub_inverse() {
+        // Seeded for determinism; real usage requires OsRng.
         let mut rng = ChaCha20Rng::seed_from_u64(42);
         let p1 = sample_uniform_gamma1_vec(&mut rng, 1, 1000)[0];
         let p2 = sample_uniform_gamma1_vec(&mut rng, 1, 1000)[0];
@@ -464,6 +463,7 @@ mod tests {
 
     #[test]
     fn test_high_low_bits_reconstruction() {
+        // Seeded for determinism; real usage requires OsRng.
         let mut rng = ChaCha20Rng::seed_from_u64(42);
         let p = sample_uniform_gamma1_vec(&mut rng, 1, 1000)[0];
         let gamma2 = EYVARA_128.gamma_2();
@@ -485,6 +485,7 @@ mod tests {
     #[test]
     fn test_make_use_hint_roundtrip_smoke() {
         let gamma2 = EYVARA_128.gamma_2();
+        // Seeded for determinism; real usage requires OsRng.
         let mut rng = ChaCha20Rng::seed_from_u64(99);
 
         for _ in 0..100 {
@@ -497,6 +498,7 @@ mod tests {
 
     #[test]
     fn test_sample_uniform_gamma1_bounds() {
+        // Seeded for determinism; real usage requires OsRng.
         let mut rng = ChaCha20Rng::seed_from_u64(7);
         let gamma1 = EYVARA_128.gamma_1();
         let p = sample_uniform_gamma1(&mut rng, gamma1);

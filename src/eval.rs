@@ -159,7 +159,7 @@ impl<'de> serde::Deserialize<'de> for EyvaraProof {
     }
 }
 
-/// Evaluate the Eyvara VRF on input `x`.
+/// Evaluates the VRF on `x` and returns the output plus a publicly verifiable proof.
 ///
 /// # Errors
 ///
@@ -176,7 +176,10 @@ where
 {
     let a_ntt = expand_a(sk.rho(), params.k());
 
+    // Rejection sampling usually succeeds quickly; EYVARA_128 is expected to
+    // need roughly four attempts or fewer in normal runs.
     for _ in 0..MAX_ATTEMPTS {
+        // y masks the secret contribution in z, so wipe it after each attempt.
         let y = Zeroizing::new(sample_uniform_gamma1_vec(rng, params.k(), params.gamma_1()));
 
         let w = poly_matrix_mul_ntt(&a_ntt, &y);
@@ -221,6 +224,8 @@ where
             continue;
         }
 
+        // Output is derived from w1, not s, so the verifier can recompute
+        // it independently via UseHint without knowing the secret key.
         let output = EyvaraOutput(hash_vrf_output(&w1, x));
         return Ok((output, EyvaraProof { c_tilde, z, h }));
     }
@@ -238,7 +243,7 @@ mod tests {
 
     #[test]
     fn test_eval_produces_output() {
-        // Deterministic RNG is used only for reproducible tests.
+        // Seeded for determinism; real usage requires OsRng.
         let mut rng = ChaCha20Rng::seed_from_u64(42);
         let (_, sk) = eyvara_keygen(&EYVARA_128, &mut rng);
         let result = eyvara_eval(&EYVARA_128, &sk, b"test input", &mut rng);
@@ -247,7 +252,7 @@ mod tests {
 
     #[test]
     fn test_eval_different_inputs_different_outputs() {
-        // Deterministic RNG is used only for reproducible tests.
+        // Seeded for determinism; real usage requires OsRng.
         let mut rng = ChaCha20Rng::seed_from_u64(42);
         let (_, sk) = eyvara_keygen(&EYVARA_128, &mut rng);
 
@@ -259,6 +264,7 @@ mod tests {
 
     #[test]
     fn test_eval_proof_structure() {
+        // Seeded for determinism; real usage requires OsRng.
         let mut rng = ChaCha20Rng::seed_from_u64(42);
         let (_, sk) = eyvara_keygen(&EYVARA_128, &mut rng);
 

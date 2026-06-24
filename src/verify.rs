@@ -31,6 +31,8 @@ pub fn eyvara_verify(
     output: &EyvaraOutput,
     proof: &EyvaraProof,
 ) -> Result<bool, EyvaraError> {
+    // Checks are ordered from cheapest to most expensive.
+    // Any failure returns immediately without performing further work.
     if pk.t.len() != params.k() {
         return Err(EyvaraError::MalformedPublicKey);
     }
@@ -90,6 +92,7 @@ mod tests {
 
     #[test]
     fn test_verify_honest_proof() {
+        // Seeded for determinism; real usage requires OsRng.
         let mut rng = ChaCha20Rng::seed_from_u64(42);
         let (pk, sk) = eyvara_keygen(&EYVARA_128, &mut rng);
         let input = b"verify test";
@@ -103,6 +106,7 @@ mod tests {
 
     #[test]
     fn test_verify_wrong_input() {
+        // Seeded for determinism; real usage requires OsRng.
         let mut rng = ChaCha20Rng::seed_from_u64(42);
         let (pk, sk) = eyvara_keygen(&EYVARA_128, &mut rng);
         let (beta, proof) = eyvara_eval(&EYVARA_128, &sk, b"correct input", &mut rng).unwrap();
@@ -115,10 +119,12 @@ mod tests {
 
     #[test]
     fn test_verify_wrong_key() {
+        // Seeded for determinism; real usage requires OsRng.
         let mut rng = ChaCha20Rng::seed_from_u64(42);
         let (_, sk) = eyvara_keygen(&EYVARA_128, &mut rng);
         let (beta, proof) = eyvara_eval(&EYVARA_128, &sk, b"test", &mut rng).unwrap();
 
+        // Seeded for determinism; real usage requires OsRng.
         let mut rng2 = ChaCha20Rng::seed_from_u64(99);
         let (pk2, _) = eyvara_keygen(&EYVARA_128, &mut rng2);
 
@@ -130,6 +136,7 @@ mod tests {
 
     #[test]
     fn test_verify_tampered_proof() {
+        // Seeded for determinism; real usage requires OsRng.
         let mut rng = ChaCha20Rng::seed_from_u64(42);
         let (pk, sk) = eyvara_keygen(&EYVARA_128, &mut rng);
         let (beta, mut proof) = eyvara_eval(&EYVARA_128, &sk, b"tamper test", &mut rng).unwrap();

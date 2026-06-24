@@ -120,6 +120,7 @@ impl SecretKey {
 
 impl std::fmt::Debug for SecretKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Redact secret material from debug output.
         f.debug_struct("SecretKey")
             .field("rho", &self.rho)
             .field("s", &"[REDACTED]")
@@ -129,7 +130,9 @@ impl std::fmt::Debug for SecretKey {
     }
 }
 
-/// Generate an Eyvara VRF key pair.
+/// Generates a public key and non-cloneable secret key using a cryptographic
+/// RNG. The caller must supply a [`CryptoRng`] so key material is never derived
+/// from predictable randomness in normal use.
 pub fn eyvara_keygen<R>(params: &Params, rng: &mut R) -> (PublicKey, SecretKey)
 where
     R: CryptoRng + RngCore,
@@ -188,7 +191,7 @@ mod tests {
 
     #[test]
     fn test_keygen_produces_valid_keys() {
-        // Deterministic RNG is used only for reproducible tests.
+        // Seeded for determinism; real usage requires OsRng.
         let mut rng = ChaCha20Rng::seed_from_u64(42);
         let (pk, sk) = eyvara_keygen(&EYVARA_128, &mut rng);
 
@@ -202,8 +205,9 @@ mod tests {
 
     #[test]
     fn test_keygen_different_seeds_different_keys() {
-        // Deterministic RNG is used only for reproducible tests.
+        // Seeded for determinism; real usage requires OsRng.
         let mut rng1 = ChaCha20Rng::seed_from_u64(1);
+        // Seeded for determinism; real usage requires OsRng.
         let mut rng2 = ChaCha20Rng::seed_from_u64(2);
         let (pk1, _) = eyvara_keygen(&EYVARA_128, &mut rng1);
         let (pk2, _) = eyvara_keygen(&EYVARA_128, &mut rng2);
@@ -213,6 +217,7 @@ mod tests {
 
     #[test]
     fn test_secret_key_debug_redacts_secret_fields() {
+        // Seeded for determinism; real usage requires OsRng.
         let mut rng = ChaCha20Rng::seed_from_u64(42);
         let (_, sk) = eyvara_keygen(&EYVARA_128, &mut rng);
         let debug = format!("{sk:?}");

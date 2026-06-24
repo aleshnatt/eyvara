@@ -21,13 +21,7 @@
 #![allow(clippy::module_name_repetitions)]
 #![allow(clippy::similar_names)]
 
-//! # eyvara_vrf
-//!
-//! `eyvara_vrf` is a research implementation of a post-quantum,
-//! lattice-based Verifiable Random Function from Module-LWE.
-//!
-//! The public API consists of key generation, evaluation, verification, and
-//! two sealed parameter sets.
+
 //!
 //! ```rust
 //! use eyvara_vrf::{eyvara_eval, eyvara_keygen, eyvara_verify, EyvaraError, EYVARA_128};
@@ -36,14 +30,13 @@
 //! fn main() -> Result<(), EyvaraError> {
 //!     let mut rng = OsRng;
 //!     let (pk, sk) = eyvara_keygen(&EYVARA_128, &mut rng);
-//!
-//!     let input = b"example input";
-//!     let (output, proof) = eyvara_eval(&EYVARA_128, &sk, input, &mut rng)?;
-//!
-//!     assert!(eyvara_verify(&EYVARA_128, &pk, input, &output, &proof)?);
+//!     let msg = b"example input";
+//!     let (out, proof) = eyvara_eval(&EYVARA_128, &sk, msg, &mut rng)?;
+//!     assert!(eyvara_verify(&EYVARA_128, &pk, msg, &out, &proof)?);
 //!     Ok(())
 //! }
 //! ```
+//!
 
 pub(crate) mod challenge;
 pub mod error;

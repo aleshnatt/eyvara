@@ -49,10 +49,8 @@ pub const DOMAIN_MATRIX: &[u8] = b"vrf-matrix\x00\x00\x00\x00\x00\x00";
 
 /// System parameters for the Eyvara VRF scheme.
 ///
-/// The fields of this struct are private. Consumers must use the provided
-/// parameter sets [`EYVARA_128`] or [`EYVARA_192`]. Constructing custom
-/// parameters is not supported in the public API because incorrect parameter
-/// choices can silently break security.
+/// The fields are private; use [`EYVARA_128`] or [`EYVARA_192`]. Custom
+/// parameters are not part of the public API because bad choices break security.
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Params {
@@ -153,10 +151,11 @@ impl Params {
     }
 }
 
-/// Eyvara-I parameter set targeting NIST Category 1.
+/// NIST Category 1 parameter set. Suitable for most applications.
 pub const EYVARA_128: Params = Params::new(256, 2, 8_380_417, 2, 131_072, 95_232, 39, 78, 80);
 
-/// Eyvara-III parameter set targeting NIST Category 3.
+/// NIST Category 3 parameter set. Use when a higher security margin is
+/// required, at the cost of larger proofs and slower operations.
 pub const EYVARA_192: Params = Params::new(256, 3, 8_380_417, 2, 524_288, 261_888, 49, 98, 120);
 
 #[cfg(test)]

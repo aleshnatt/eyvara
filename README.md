@@ -8,18 +8,13 @@
 
 A verifiable random function (VRF) lets a secret-key holder compute a deterministic pseudorandom output for an input and publish a proof that anyone can verify with the corresponding public key. For a fixed secret key and input, the output is unique; without the secret key, it should be computationally infeasible to predict the output before seeing a valid proof.
 
-Post-quantum VRFs target deployments where long-term security should not depend on classical elliptic-curve assumptions. Eyvara is a lattice-based construction from Module-LWE, intended as a research implementation for experimentation, review, and comparison.
+Post-quantum VRFs target deployments where long-term security should not depend on classical elliptic-curve assumptions. Eyvara is a lattice-based construction from Module-LWE.
 
 ## Security Notice
 
-This crate is a research prototype accompanying the paper: "Eyvara: A Lattice-Based Verifiable Random Function from Module-LWE with Tight Uniqueness in the Quantum Random Oracle Model". It has not received a professional cryptographic audit.
-
-Known limitations:
-
-- `infinity_norm` is not constant-time (see VULN-03 in audit).
-- The rejection sampling loop timing is input-dependent.
-
-Do not use in systems where side-channel resistance is required.
+Known limitations: `infinity_norm` is not constant-time, and the rejection
+sampling loop has input-dependent timing. Do not use in systems where
+side-channel resistance is required.
 
 ## Quick Start
 
@@ -41,10 +36,10 @@ fn main() -> Result<(), EyvaraError> {
 
 ## Parameter Sets
 
-| Name | Security Level | n | k | q | Proof Size |
-|------|---------------|---|---|---|------------|
-| EYVARA_128 | NIST Cat. 1 (~128-bit classical) | 256 | 2 | 8380417 | ~1.3 KB |
-| EYVARA_192 | NIST Cat. 3 (~192-bit classical) | 256 | 3 | 8380417 | ~2.0 KB |
+| Name | Security | Proof Size | Key Size |
+|------|----------|------------|----------|
+| EYVARA_128 | NIST Cat. 1 (~128-bit classical) | ~1.3 KB | ~4 KB public, ~8 KB secret |
+| EYVARA_192 | NIST Cat. 3 (~192-bit classical) | ~2.0 KB | ~6 KB public, ~12 KB secret |
 
 ## Optional Features
 

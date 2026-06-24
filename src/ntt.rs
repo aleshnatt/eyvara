@@ -23,10 +23,6 @@ pub const ZETAS: [i64; N] = {
     // The twiddle factors are computed as zeta^{brv(i)} * R mod Q
     // where brv is the bit-reversal permutation and R = 2^32 mod Q.
     let mut zetas = [0i64; N];
-    // We compute these at compile time using const evaluation.
-    // zeta = 1753, R = 2^32 mod Q = 4193792
-    // zeta_mont = zeta * R mod Q
-
     // Bit-reversed powers of zeta in Montgomery domain.
     // These are the standard Dilithium NTT twiddle factors for q = 8380417.
     zetas[0] = 0;
@@ -355,9 +351,8 @@ pub fn ntt_inverse(a: &mut [i64; N]) {
         len <<= 1;
     }
 
-    // Multiply by N^{-1} in Montgomery form.
-    // f = Mont(2^32 / 256 mod Q) = Mont(R * N^{-1} mod Q)
-    let f: i64 = 41978; // (2^32 / 256) mod Q in Montgomery form
+    // f = Mont(R * N^{-1}) for R = 2^32 and N = 256.
+    let f: i64 = 41978;
     for coeff in a.iter_mut() {
         *coeff = montgomery_reduce(f * *coeff);
     }
@@ -407,17 +402,14 @@ mod tests {
 
     #[test]
     fn test_montgomery_reduce_identity() {
-        // Montgomery reduce of a * R should give a (approximately)
         let a = 12345i64;
         let ar = a * (1i64 << 32) % Q;
         let result = montgomery_reduce(ar);
-        // result should be congruent to a mod Q
         assert_eq!((result % Q + Q) % Q, (a % Q + Q) % Q);
     }
 
     #[test]
     fn test_ntt_roundtrip() {
-        // Forward NTT followed by inverse NTT should recover the original polynomial
         let mut a = [0i64; N];
         for i in 0..N {
             a[i] = (i as i64 * 137 + 42) % Q;
