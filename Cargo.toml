@@ -2,23 +2,39 @@
 name = "eyvara_vrf"
 version = "0.1.0"
 edition = "2021"
-authors = ["Eyvara Research Team"]
-description = "A lattice-based Verifiable Random Function from Module-LWE with tight uniqueness in the QROM"
+rust-version = "1.70"
+authors = ["Naufal Ziyaadaturrahman <naufal@aleshnatt.com>"]
+description = "Post-quantum lattice-based Verifiable Random Function (VRF) from Module-LWE with tight uniqueness in the Quantum Random Oracle Model"
+documentation = "https://docs.rs/eyvara_vrf"
+homepage = "https://github.com/aleshnatt/eyvara"
+repository = "https://github.com/aleshnatt/eyvara"
+readme = "README.md"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/eyvara-vrf/eyvara"
-keywords = ["vrf", "lattice", "post-quantum", "cryptography", "mlwe"]
-categories = ["cryptography"]
+keywords = ["cryptography", "post-quantum", "vrf", "lattice", "mlwe"]
+categories = ["cryptography", "no-std"]
+exclude = ["paper/", ".github/", "audit/", ".DS_Store"]
+
+[lib]
+name = "eyvara_vrf"
+path = "src/lib.rs"
 
 [dependencies]
 sha3 = "0.10"
 rand = "0.8"
 rand_chacha = "0.3"
-zeroize = { version = "1.6", features = ["derive"] }
-serde = { version = "1.0", features = ["derive"] }
-hex = "0.4"
+zeroize = { version = "1.7", features = ["derive"] }
+subtle = "2.6"
+serde = { version = "1.0", features = ["derive"], optional = true }
+hex = { version = "0.4", optional = true }
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
+rand = { version = "0.8", features = ["std"] }
+
+[features]
+default = []
+serde = ["dep:serde"]
+hex = ["dep:hex"]
 
 [[bench]]
 name = "bench"

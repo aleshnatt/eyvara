@@ -1,103 +1,101 @@
-# Eyvara VRF
+# eyvara_vrf
 
-A lattice-based Verifiable Random Function (VRF) from Module-LWE with tight uniqueness in the Quantum Random Oracle Model (QROM).
+Post-quantum lattice-based Verifiable Random Function (VRF) from Module-LWE with tight uniqueness in the Quantum Random Oracle Model.
+
+[![Crates.io](https://img.shields.io/crates/v/eyvara_vrf.svg)](https://crates.io/crates/eyvara_vrf)
+[![docs.rs](https://img.shields.io/docsrs/eyvara_vrf)](https://docs.rs/eyvara_vrf)
+[![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)]()
 
 ## Overview
 
-Eyvara is a post-quantum VRF construction built on the hardness of the Module Learning With Errors (MLWE) and Module Short Integer Solution (MSIS) problems. It uses the Fiat-Shamir with Aborts paradigm (Lyubashevsky 2012) to produce compact proofs and achieves the three standard VRF security properties—pseudorandomness, provability, and uniqueness—with tight reductions in the QROM.
+A verifiable random function lets a secret-key holder compute a pseudorandom output for an input and publish a proof that anyone can verify with the public key. Verification checks both the proof and the claimed output, so a valid proof binds the input to one public VRF value.
 
-## ⚠️ Security Notice
+Eyvara is a research implementation of a lattice-based VRF built from Module-LWE using Fiat-Shamir with Aborts. Its proof follows a Dilithium-style commitment, challenge, response, and hint structure so the verifier can recover the high bits of the commitment and recompute the expected output.
 
-**This is a reference implementation for research purposes only.** It has not been audited for production use. Do not use this in security-critical applications without a thorough independent cryptographic review. The implementation prioritizes clarity and correctness over side-channel resistance.
+Post-quantum VRFs are intended for settings where classical elliptic-curve assumptions are not acceptable. This crate provides reference parameter sets targeting 128-bit and 192-bit classical security levels for experimentation and review.
 
-## Parameter Sets
+## Security Notice
 
-| Parameter | Eyvara-I | Eyvara-III |
-|-----------|----------|------------|
-| NIST Category | 1 (128-bit) | 3 (192-bit) |
-| Ring dimension (n) | 256 | 256 |
-| Module rank (k) | 2 | 3 |
-| Modulus (q) | 8,380,417 | 8,380,417 |
-| Secret bound (η) | 2 | 2 |
-| Challenge weight (τ) | 39 | 49 |
-| Masking range (γ₁) | 2¹⁷ | 2¹⁹ |
-| Proof size | ~1,250 bytes | ~2,051 bytes |
-| Output size | 64 bytes | 64 bytes |
+This crate is a research prototype. It is not audited for production deployment and should not be used in security-critical systems without an independent professional cryptographic review.
 
-## Build
+The current implementation addresses audit findings for output binding (VULN-01), zeroization of evaluation intermediates (VULN-02), and documented timing risk around coefficient norm computation with a constant-time-oriented alternative (VULN-03). These remediations do not replace a full implementation and protocol audit.
 
-```bash
-cargo build --release
-```
-
-## Test
-
-```bash
-cargo test
-```
-
-## Benchmark
-
-```bash
-cargo bench
-```
-
-Benchmarks use the [Criterion](https://github.com/bheisler/criterion.rs) framework and measure key generation, evaluation, verification, and full round-trip performance.
-
-## Usage
+## Quick Start
 
 ```rust
-use eyvara_vrf::params::EYVARA_I;
-use eyvara_vrf::keygen::eyvara_keygen;
-use eyvara_vrf::eval::eyvara_eval;
-use eyvara_vrf::verify::eyvara_verify;
+use eyvara_vrf::{eyvara_eval, eyvara_keygen, eyvara_verify, EYVARA_128};
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
 
-fn main() {
-    let mut rng = ChaCha20Rng::from_entropy();
-    
-    // Key generation
-    let (pk, sk) = eyvara_keygen(&EYVARA_I, &mut rng);
-    
-    // VRF evaluation
-    let input = b"example VRF input";
-    let (beta, proof) = eyvara_eval(&EYVARA_I, &sk, input, &mut rng)
-        .expect("evaluation should succeed");
-    
-    // Verification
-    assert!(eyvara_verify(&EYVARA_I, &pk, input, &beta, &proof));
-    
-    println!("VRF output: {}", hex::encode(&beta));
-}
+let mut rng = ChaCha20Rng::seed_from_u64(42);
+let (pk, sk) = eyvara_keygen(&EYVARA_128, &mut rng);
+
+let input = b"example input";
+let (output, proof) = eyvara_eval(&EYVARA_128, &sk, input, &mut rng)
+    .expect("evaluation should succeed");
+
+assert!(eyvara_verify(&EYVARA_128, &pk, input, &output, &proof));
 ```
 
-## Crate Structure
+## Parameter Sets
 
-| Module | Description |
-|--------|-------------|
-| `params` | System parameters for Eyvara-I and Eyvara-III |
-| `poly` | Polynomial arithmetic over R_q, sampling, HighBits/LowBits |
-| `ntt` | Number Theoretic Transform for fast polynomial multiplication |
-| `challenge` | Challenge polynomial sampling (SampleInBall) and hashing |
-| `keygen` | MLWE-based key generation |
-| `eval` | VRF evaluation with Fiat-Shamir with Aborts |
-| `verify` | VRF proof verification |
-| `tests` | Integration test suite |
+| Parameter set | n | k | q | Security level |
+|---|---:|---:|---:|---|
+| `EYVARA_128` | 256 | 2 | 8,380,417 | 128-bit classical |
+| `EYVARA_192` | 256 | 3 | 8,380,417 | 192-bit classical |
+
+## Features
+
+The crate has no default optional features.
+
+Enable `serde` to derive `Serialize` and `Deserialize` for public parameter metadata:
+
+```toml
+eyvara_vrf = { version = "0.1.0", features = ["serde"] }
+```
+
+Enable `hex` when downstream applications want the optional dependency available for encoding integration:
+
+```toml
+eyvara_vrf = { version = "0.1.0", features = ["hex"] }
+```
+
+## Installation
+
+```toml
+[dependencies]
+eyvara_vrf = "0.1.0"
+```
+
+## Building
+
+```sh
+cargo build --release
+```
+
+The pre-publish checklist is available as an executable script:
+
+```sh
+./scripts/pre_publish.sh
+```
+
+## Testing
+
+```sh
+cargo test
+cargo test --doc
+```
+
+## Benchmarks
+
+```sh
+cargo bench
+```
 
 ## Paper
 
-The accompanying paper describes the construction, security proofs, and parameter derivation in detail:
-
-> "Eyvara: A Lattice-Based Verifiable Random Function from Module-LWE with Tight Uniqueness in the Quantum Random Oracle Model"
-
-See the `paper/` directory for the LaTeX source.
+Eyvara: A Post-Quantum Lattice-Based Verifiable Random Function from Module-LWE. An IACR ePrint link will be added when available. This crate is the reference implementation.
 
 ## License
 
-This project is licensed under either of:
-
-- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
-- MIT License ([LICENSE-MIT](LICENSE-MIT))
-
-at your option.
+Licensed under MIT OR Apache-2.0.

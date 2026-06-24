@@ -8,9 +8,12 @@
 //! The challenge polynomial c has exactly tau nonzero coefficients, each ±1,
 //! giving a challenge space of size |C| = C(N, tau) * 2^tau.
 
-use crate::params::{N, CHALLENGE_SEED_SIZE, DOMAIN_CHALLENGE, DOMAIN_OUTPUT, OUTPUT_SIZE};
-use crate::poly::{Poly, poly_zero, poly_vec_to_bytes};
-use sha3::{Shake256, digest::{Update, ExtendableOutput, XofReader}};
+use crate::params::{CHALLENGE_SEED_SIZE, DOMAIN_CHALLENGE, DOMAIN_OUTPUT, N, OUTPUT_SIZE};
+use crate::poly::{poly_vec_to_bytes, poly_zero, Poly};
+use sha3::{
+    digest::{ExtendableOutput, Update, XofReader},
+    Shake256,
+};
 
 /// Derive a sparse ternary challenge polynomial from a 32-byte seed.
 ///
@@ -71,11 +74,7 @@ pub fn sample_in_ball(seed: &[u8; CHALLENGE_SEED_SIZE], tau: usize) -> Poly {
 /// the output hash H_2.
 ///
 /// Returns a 32-byte seed suitable for `sample_in_ball`.
-pub fn hash_to_challenge_seed(
-    w1: &[Poly],
-    t: &[Poly],
-    x: &[u8],
-) -> [u8; CHALLENGE_SEED_SIZE] {
+pub fn hash_to_challenge_seed(w1: &[Poly], t: &[Poly], x: &[u8]) -> [u8; CHALLENGE_SEED_SIZE] {
     let mut hasher = Shake256::default();
     hasher.update(DOMAIN_CHALLENGE);
     hasher.update(&poly_vec_to_bytes(w1));
@@ -91,20 +90,18 @@ pub fn hash_to_challenge_seed(
 /// Compute the VRF output hash H_2.
 ///
 /// The VRF output is computed as:
-///   beta = SHAKE-256(DOMAIN_OUTPUT || s_bytes || x)
+///   beta = SHAKE-256("eyvara-output" || w1_bytes || x)
 ///
-/// where s_bytes is the serialized secret key vector s and x is the VRF input.
-/// The output is 64 bytes (512 bits), providing 256-bit collision resistance.
+/// where w1 is the high-order commitment recovered during verification and x
+/// is the VRF input. The output is 64 bytes (512 bits), providing 256-bit
+/// collision resistance.
 ///
-/// This function is deterministic: for a fixed (s, x), the output is always
-/// the same, as required by the VRF correctness definition.
-pub fn hash_vrf_output(
-    s_bytes: &[u8],
-    x: &[u8],
-) -> [u8; OUTPUT_SIZE] {
+/// This binding lets the verifier recompute and check the claimed output
+/// without access to the secret key.
+pub fn hash_vrf_output(w1: &[Poly], x: &[u8]) -> [u8; OUTPUT_SIZE] {
     let mut hasher = Shake256::default();
     hasher.update(DOMAIN_OUTPUT);
-    hasher.update(s_bytes);
+    hasher.update(&poly_vec_to_bytes(w1));
     hasher.update(x);
 
     let mut reader = hasher.finalize_xof();
@@ -116,20 +113,27 @@ pub fn hash_vrf_output(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::params::EYVARA_I;
+    use crate::params::EYVARA_128;
 
     #[test]
     fn test_sample_in_ball_weight() {
         let seed = [42u8; CHALLENGE_SEED_SIZE];
-        let c = sample_in_ball(&seed, EYVARA_I.tau);
+        let c = sample_in_ball(&seed, EYVARA_128.tau);
 
         // Count nonzero coefficients
         let weight: usize = c.iter().filter(|&&v| v != 0).count();
-        assert_eq!(weight, EYVARA_I.tau, "challenge should have exactly tau nonzero coefficients");
+        assert_eq!(
+            weight, EYVARA_128.tau,
+            "challenge should have exactly tau nonzero coefficients"
+        );
 
         // All nonzero coefficients should be ±1
         for &v in c.iter() {
-            assert!(v == -1 || v == 0 || v == 1, "coefficient {} not in {{-1, 0, 1}}", v);
+            assert!(
+                v == -1 || v == 0 || v == 1,
+                "coefficient {} not in {{-1, 0, 1}}",
+                v
+            );
         }
     }
 
@@ -147,29 +151,33 @@ mod tests {
         let seed2 = [2u8; CHALLENGE_SEED_SIZE];
         let c1 = sample_in_ball(&seed1, 39);
         let c2 = sample_in_ball(&seed2, 39);
-        assert_ne!(c1, c2, "different seeds should produce different challenges");
+        assert_ne!(
+            c1, c2,
+            "different seeds should produce different challenges"
+        );
     }
 
     #[test]
     fn test_hash_vrf_output_deterministic() {
-        let s_bytes = b"test_secret_key_bytes";
+        let w1 = vec![poly_zero()];
         let x = b"test_input";
-        let o1 = hash_vrf_output(s_bytes, x);
-        let o2 = hash_vrf_output(s_bytes, x);
+        let o1 = hash_vrf_output(&w1, x);
+        let o2 = hash_vrf_output(&w1, x);
         assert_eq!(o1, o2);
     }
 
     #[test]
     fn test_hash_vrf_output_different_inputs() {
-        let s_bytes = b"test_secret_key_bytes";
-        let o1 = hash_vrf_output(s_bytes, b"input1");
-        let o2 = hash_vrf_output(s_bytes, b"input2");
+        let w1 = vec![poly_zero()];
+        let o1 = hash_vrf_output(&w1, b"input1");
+        let o2 = hash_vrf_output(&w1, b"input2");
         assert_ne!(o1, o2, "different inputs should produce different outputs");
     }
 
     #[test]
     fn test_hash_vrf_output_size() {
-        let o = hash_vrf_output(b"key", b"input");
+        let w1 = vec![poly_zero()];
+        let o = hash_vrf_output(&w1, b"input");
         assert_eq!(o.len(), OUTPUT_SIZE);
     }
 }

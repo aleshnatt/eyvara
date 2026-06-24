@@ -5,6 +5,7 @@
 //! analysis in the accompanying paper and are compatible with CRYSTALS-Dilithium
 //! parameter choices.
 
+#[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 /// Ring dimension. The polynomial ring is Z[X]/(X^N + 1).
@@ -43,10 +44,10 @@ pub const CHALLENGE_SEED_SIZE: usize = 32;
 pub const SEED_SIZE: usize = 32;
 
 /// Domain separation tag for the challenge hash H_1.
-pub const DOMAIN_CHALLENGE: &[u8] = b"vrf-challenge\x00\x00\x00";
+pub const DOMAIN_CHALLENGE: &[u8] = b"eyvara-challenge";
 
 /// Domain separation tag for the output hash H_2.
-pub const DOMAIN_OUTPUT: &[u8] = b"vrf-output\x00\x00\x00\x00\x00\x00";
+pub const DOMAIN_OUTPUT: &[u8] = b"eyvara-output";
 
 /// Domain separation tag for matrix expansion.
 pub const DOMAIN_MATRIX: &[u8] = b"vrf-matrix\x00\x00\x00\x00\x00\x00";
@@ -54,8 +55,9 @@ pub const DOMAIN_MATRIX: &[u8] = b"vrf-matrix\x00\x00\x00\x00\x00\x00";
 /// Parameter set for an Eyvara instance.
 ///
 /// Each field corresponds to a parameter from the paper's Table I.
-/// Two const instances are provided: `EYVARA_I` and `EYVARA_III`.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+/// Two const instances are provided: `EYVARA_128` and `EYVARA_192`.
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Debug, Clone, Copy)]
 pub struct Params {
     /// Module rank. k=2 for Category 1, k=3 for Category 3.
     pub k: usize,
@@ -105,7 +107,7 @@ impl Params {
 /// Module rank k=2, giving MLWE dimension n*k = 512. The masking range
 /// gamma1 = 2^17 and challenge weight tau = 39 yield an acceptance probability
 /// of approximately 0.74 per iteration and a challenge space of ~2^196.
-pub const EYVARA_I: Params = Params {
+pub const EYVARA_128: Params = Params {
     k: 2,
     eta: 2,
     tau: 39,
@@ -121,7 +123,7 @@ pub const EYVARA_I: Params = Params {
 /// Module rank k=3, giving MLWE dimension n*k = 768. The larger masking range
 /// gamma1 = 2^19 increases acceptance probability to ~0.87 and the challenge
 /// space to ~2^237, at the cost of larger proofs (20 bits per z coefficient).
-pub const EYVARA_III: Params = Params {
+pub const EYVARA_192: Params = Params {
     k: 3,
     eta: 2,
     tau: 49,
@@ -138,24 +140,24 @@ mod tests {
 
     #[test]
     fn test_eyvara_i_rejection_bound() {
-        assert_eq!(EYVARA_I.rejection_bound(), 131072 - 78);
+        assert_eq!(EYVARA_128.rejection_bound(), 131_072 - 78);
     }
 
     #[test]
     fn test_eyvara_iii_rejection_bound() {
-        assert_eq!(EYVARA_III.rejection_bound(), 524288 - 98);
+        assert_eq!(EYVARA_192.rejection_bound(), 524_288 - 98);
     }
 
     #[test]
     fn test_gamma2_divides_q_minus_1() {
-        assert_eq!((Q - 1) % (2 * EYVARA_I.gamma2), 0);
-        assert_eq!((Q - 1) % (2 * EYVARA_III.gamma2), 0);
+        assert_eq!((Q - 1) % (2 * EYVARA_128.gamma2), 0);
+        assert_eq!((Q - 1) % (2 * EYVARA_192.gamma2), 0);
     }
 
     #[test]
-    fn test_domain_tags_are_16_bytes() {
+    fn test_domain_tags_are_nonempty() {
         assert_eq!(DOMAIN_CHALLENGE.len(), 16);
-        assert_eq!(DOMAIN_OUTPUT.len(), 16);
+        assert!(!DOMAIN_OUTPUT.is_empty());
         assert_eq!(DOMAIN_MATRIX.len(), 16);
     }
 }

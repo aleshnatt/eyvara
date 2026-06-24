@@ -5,9 +5,9 @@
 //! context, while the secret key contains the short vectors s, e needed for
 //! evaluation.
 
-use crate::params::{Params, N, SEED_SIZE};
-use crate::poly::{Poly, PolyVec, expand_a, sample_cbd_vec, poly_zero};
 use crate::ntt::{ntt_forward, ntt_inverse, ntt_pointwise_mul};
+use crate::params::{Params, N, SEED_SIZE};
+use crate::poly::{expand_a, poly_zero, sample_cbd_vec, Poly, PolyVec};
 use rand::Rng;
 use zeroize::Zeroize;
 
@@ -102,11 +102,14 @@ pub fn eyvara_keygen<R: Rng>(params: &Params, rng: &mut R) -> (PublicKey, Secret
 
     // Step 5: Compute t = As + e mod q
     // Transform s to NTT domain
-    let s_ntt: Vec<Poly> = s.iter().map(|p| {
-        let mut pn = *p;
-        ntt_forward(&mut pn);
-        pn
-    }).collect();
+    let s_ntt: Vec<Poly> = s
+        .iter()
+        .map(|p| {
+            let mut pn = *p;
+            ntt_forward(&mut pn);
+            pn
+        })
+        .collect();
 
     let mut t = vec![poly_zero(); params.k];
     for i in 0..params.k {
@@ -125,17 +128,9 @@ pub fn eyvara_keygen<R: Rng>(params: &Params, rng: &mut R) -> (PublicKey, Secret
         t[i] = acc;
     }
 
-    let pk = PublicKey {
-        rho,
-        t: t.clone(),
-    };
+    let pk = PublicKey { rho, t: t.clone() };
 
-    let sk = SecretKey {
-        rho,
-        s,
-        e,
-        t,
-    };
+    let sk = SecretKey { rho, s, e, t };
 
     (pk, sk)
 }
@@ -143,7 +138,7 @@ pub fn eyvara_keygen<R: Rng>(params: &Params, rng: &mut R) -> (PublicKey, Secret
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::params::EYVARA_I;
+    use crate::params::EYVARA_128;
     use crate::poly::infinity_norm_vec;
     use rand::SeedableRng;
     use rand_chacha::ChaCha20Rng;
@@ -151,14 +146,14 @@ mod tests {
     #[test]
     fn test_keygen_produces_valid_keys() {
         let mut rng = ChaCha20Rng::seed_from_u64(42);
-        let (pk, sk) = eyvara_keygen(&EYVARA_I, &mut rng);
+        let (pk, sk) = eyvara_keygen(&EYVARA_128, &mut rng);
 
         // Public key should have k polynomials
-        assert_eq!(pk.t.len(), EYVARA_I.k);
+        assert_eq!(pk.t.len(), EYVARA_128.k);
 
         // Secret vectors should have bounded norms
-        assert!(infinity_norm_vec(&sk.s) <= EYVARA_I.eta);
-        assert!(infinity_norm_vec(&sk.e) <= EYVARA_I.eta);
+        assert!(infinity_norm_vec(&sk.s) <= EYVARA_128.eta);
+        assert!(infinity_norm_vec(&sk.e) <= EYVARA_128.eta);
 
         // pk.t and sk.t should match
         assert_eq!(pk.t, sk.t);
@@ -171,8 +166,8 @@ mod tests {
     fn test_keygen_different_seeds_different_keys() {
         let mut rng1 = ChaCha20Rng::seed_from_u64(1);
         let mut rng2 = ChaCha20Rng::seed_from_u64(2);
-        let (pk1, _) = eyvara_keygen(&EYVARA_I, &mut rng1);
-        let (pk2, _) = eyvara_keygen(&EYVARA_I, &mut rng2);
+        let (pk1, _) = eyvara_keygen(&EYVARA_128, &mut rng1);
+        let (pk2, _) = eyvara_keygen(&EYVARA_128, &mut rng2);
 
         assert_ne!(pk1.rho, pk2.rho);
     }

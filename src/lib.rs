@@ -1,57 +1,60 @@
-//! # Eyvara VRF
+#![forbid(unsafe_code)]
+#![deny(missing_docs)]
+#![warn(clippy::all)]
+#![warn(clippy::pedantic)]
+#![allow(clippy::bool_to_int_with_if)]
+#![allow(clippy::assign_op_pattern)]
+#![allow(clippy::cast_lossless)]
+#![allow(clippy::cast_possible_truncation)]
+#![allow(clippy::cast_possible_wrap)]
+#![allow(clippy::cast_sign_loss)]
+#![allow(clippy::doc_markdown)]
+#![allow(clippy::explicit_iter_loop)]
+#![allow(clippy::if_not_else)]
+#![allow(clippy::inline_always)]
+#![allow(clippy::many_single_char_names)]
+#![allow(clippy::must_use_candidate)]
+#![allow(clippy::needless_range_loop)]
+#![allow(clippy::redundant_closure)]
+#![allow(clippy::unreadable_literal)]
+#![allow(dead_code)]
+#![allow(clippy::module_name_repetitions)]
+#![allow(clippy::similar_names)]
+
+//! # eyvara_vrf
 //!
-//! A lattice-based Verifiable Random Function (VRF) from the Module Learning
-//! With Errors (MLWE) assumption, with tight uniqueness in the Quantum Random
-//! Oracle Model (QROM).
+//! `eyvara_vrf` is a research implementation of a post-quantum,
+//! lattice-based Verifiable Random Function from Module-LWE.
 //!
-//! ## Security Notice
-//!
-//! This is a **reference implementation** for research purposes. It has not been
-//! audited for production use. Do not deploy this in security-critical applications
-//! without a thorough cryptographic review.
-//!
-//! ## Overview
-//!
-//! Eyvara provides three algorithms:
-//! - **KeyGen**: Generate a public/secret key pair from MLWE parameters.
-//! - **Eval**: Compute a deterministic pseudorandom output and verifiable proof.
-//! - **Verify**: Check that a proof is valid for a given public key and input.
-//!
-//! Two parameter sets are supported:
-//! - **Eyvara-I**: NIST Category 1 (≥128-bit classical security)
-//! - **Eyvara-III**: NIST Category 3 (≥192-bit classical security)
-//!
-//! ## Example
+//! The public API consists of key generation, evaluation, verification, and
+//! two parameter sets.
 //!
 //! ```rust
-//! use eyvara_vrf::params::EYVARA_I;
-//! use eyvara_vrf::keygen::eyvara_keygen;
-//! use eyvara_vrf::eval::eyvara_eval;
-//! use eyvara_vrf::verify::eyvara_verify;
+//! use eyvara_vrf::{eyvara_eval, eyvara_keygen, eyvara_verify, EYVARA_128};
 //! use rand::SeedableRng;
 //! use rand_chacha::ChaCha20Rng;
 //!
 //! let mut rng = ChaCha20Rng::seed_from_u64(42);
-//! let (pk, sk) = eyvara_keygen(&EYVARA_I, &mut rng);
+//! let (pk, sk) = eyvara_keygen(&EYVARA_128, &mut rng);
 //!
 //! let input = b"example input";
-//! let (beta, proof) = eyvara_eval(&EYVARA_I, &sk, input, &mut rng).unwrap();
+//! let (output, proof) = eyvara_eval(&EYVARA_128, &sk, input, &mut rng)
+//!     .expect("evaluation should succeed");
 //!
-//! assert!(eyvara_verify(&EYVARA_I, &pk, input, &beta, &proof));
+//! assert!(eyvara_verify(&EYVARA_128, &pk, input, &output, &proof));
 //! ```
 
-pub mod params;
-pub mod poly;
-pub mod ntt;
-pub mod challenge;
-pub mod keygen;
+pub(crate) mod challenge;
 pub mod eval;
+pub mod keygen;
+pub(crate) mod ntt;
+pub mod params;
+pub(crate) mod poly;
 pub mod verify;
 
-// Re-export primary types for convenience
-pub use params::{Params, EYVARA_I, EYVARA_III};
-pub use keygen::{PublicKey, SecretKey, eyvara_keygen};
-pub use eval::{VrfOutput, VrfProof, eyvara_eval};
+pub use eval::{eyvara_eval, EyvaraOutput, EyvaraProof};
+pub use keygen::{eyvara_keygen, PublicKey, SecretKey};
+pub use params::{Params, EYVARA_128, EYVARA_192};
 pub use verify::eyvara_verify;
 
 #[cfg(test)]

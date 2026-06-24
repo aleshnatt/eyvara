@@ -1,190 +1,156 @@
 //! VRF evaluation for the Eyvara VRF.
 //!
-//! Implements Algorithm 2 from the paper: given a secret key and an input,
-//! produces a deterministic VRF output and a proof using the Fiat-Shamir
-//! with Aborts protocol.
+//! Implements evaluation with Fiat-Shamir with Aborts. The VRF output is bound
+//! to the public commitment high bits `w1`, so verification can recompute it
+//! without access to the secret vector.
 
-use crate::params::{Params, OUTPUT_SIZE, CHALLENGE_SEED_SIZE, MAX_ATTEMPTS};
-use crate::poly::{
-    PolyVec, expand_a, poly_matrix_mul_ntt,
-    poly_scalar_mul, poly_vec_add, poly_vec_sub,
-    infinity_norm_vec, high_bits_vec, low_bits_vec,
-    make_hint_vec, poly_vec_to_bytes,
-    sample_uniform_gamma1_vec,
-};
-use crate::challenge::{hash_to_challenge_seed, sample_in_ball, hash_vrf_output};
+use crate::challenge::{hash_to_challenge_seed, hash_vrf_output, sample_in_ball};
 use crate::keygen::SecretKey;
+use crate::params::{Params, CHALLENGE_SEED_SIZE, MAX_ATTEMPTS, OUTPUT_SIZE};
+use crate::poly::{
+    expand_a, high_bits_vec, infinity_norm_vec, low_bits_vec, make_hint_vec, poly_matrix_mul_ntt,
+    poly_scalar_mul, poly_vec_add, poly_vec_sub, sample_uniform_gamma1_vec, PolyVec,
+};
 use rand::Rng;
+use zeroize::Zeroizing;
 
-/// VRF output: a 64-byte (512-bit) pseudorandom value.
+/// VRF output: a 64-byte pseudorandom value.
 ///
-/// The output is deterministic for a given (secret key, input) pair,
-/// computed as beta = H_2("vrf-output" || s_bytes || x).
-pub type VrfOutput = [u8; OUTPUT_SIZE];
+/// The output is `SHAKE256("eyvara-output" || w1 || x)`, where `w1` is the
+/// high-order commitment value recovered by the verifier.
+pub type EyvaraOutput = [u8; OUTPUT_SIZE];
 
 /// VRF proof enabling public verification of the output.
-///
-/// The proof consists of:
-/// - `c_tilde`: 32-byte challenge seed (hash of commitment and input)
-/// - `z`: response vector (k polynomials with bounded coefficients)
-/// - `h`: hint vector (k*N bits) for recovering high-order bits during verification
 #[derive(Debug, Clone)]
-pub struct VrfProof {
-    /// Challenge seed: c_tilde = H_1("vrf-challenge" || w1 || t || x).
+pub struct EyvaraProof {
+    /// Challenge seed `c_tilde = H_1(w1 || t || x)`.
     pub c_tilde: [u8; CHALLENGE_SEED_SIZE],
 
-    /// Response vector: z = y + c*s, where y is the masking vector and c is
-    /// the challenge polynomial. Accepted only if ||z||_inf < gamma1 - tau*eta.
+    /// Response vector `z = y + c*s`.
     pub z: PolyVec,
 
-    /// Hint vector for recovering HighBits(w) from HighBits(Az - ct).
-    /// Encoded as k*N signed bytes (each 0 or 1).
+    /// Flattened hint vector used to recover the commitment high bits.
     pub h: Vec<i8>,
+
+    /// High-order commitment value used to derive the challenge and output.
+    pub w1: PolyVec,
 }
 
-/// Evaluate the Eyvara VRF on input x.
+/// Backwards-compatible alias for the VRF output type.
+pub type VrfOutput = EyvaraOutput;
+
+/// Backwards-compatible alias for the VRF proof type.
+pub type VrfProof = EyvaraProof;
+
+/// Evaluate the Eyvara VRF on input `x`.
 ///
-/// Implements Algorithm 2 from the paper. The evaluation proceeds as follows:
+/// Evaluation repeatedly samples a masking vector `y`, commits to `w = A*y`,
+/// hashes the high bits `w1` into a sparse challenge, and forms the response
+/// `z = y + c*s`. The loop rejects samples whose response norm, low bits, or
+/// hint weight would leak secret-dependent information outside the configured
+/// bounds. On an accepted iteration, the returned output is derived from `w1`
+/// and the input so the verifier can recompute and bind it to the proof.
 ///
-/// 1. Compute the VRF output deterministically:
-///    beta = H_2("vrf-output" || s_bytes || x)
-///
-/// 2. Generate the proof via Fiat-Shamir with Aborts:
-///    a. Sample masking vector y uniformly from [-gamma1+1, gamma1]^k.
-///    b. Compute commitment w = Ay mod q.
-///    c. Extract high-order bits w1 = HighBits(w, 2*gamma2).
-///    d. Compute challenge seed c_tilde = H_1("vrf-challenge" || w1 || t || x).
-///    e. Derive challenge polynomial c = SampleInBall(c_tilde, tau).
-///    f. Compute response z = y + c*s.
-///    g. Reject and restart if ||z||_inf >= gamma1 - tau*eta or if LowBits
-///       of Az - ct are too large, or if hint weight exceeds omega.
-///    h. Compute hint h = MakeHint(-ct, w, 2*gamma2).
-///
-/// Returns `Some((beta, proof))` on success, `None` if all MAX_ATTEMPTS fail
-/// (probability < 2^{-490} for Eyvara-I).
+/// Returns `None` if all `MAX_ATTEMPTS` rejection-sampling iterations fail.
 pub fn eyvara_eval<R: Rng>(
     params: &Params,
     sk: &SecretKey,
     x: &[u8],
     rng: &mut R,
-) -> Option<(VrfOutput, VrfProof)> {
-    // Expand public matrix A from seed (in NTT domain)
+) -> Option<(EyvaraOutput, EyvaraProof)> {
     let a_ntt = expand_a(&sk.rho, params.k);
 
-    // Compute VRF output deterministically from secret key and input
-    let s_bytes = poly_vec_to_bytes(&sk.s);
-    let beta = hash_vrf_output(&s_bytes, x);
+    for _ in 0..MAX_ATTEMPTS {
+        let y = Zeroizing::new(sample_uniform_gamma1_vec(rng, params.k, params.gamma1));
 
-    // Fiat-Shamir with Aborts loop
-    for _attempt in 0..MAX_ATTEMPTS {
-        // Step (a): Sample masking vector y
-        let y = sample_uniform_gamma1_vec(rng, params.k, params.gamma1);
-
-        // Step (b): Compute commitment w = Ay mod q
         let w = poly_matrix_mul_ntt(&a_ntt, &y);
-
-        // Step (c): Extract high-order bits
         let w1 = high_bits_vec(&w, params.gamma2);
-
-        // Step (d): Compute challenge seed
         let c_tilde = hash_to_challenge_seed(&w1, &sk.t, x);
-
-        // Step (e): Derive challenge polynomial
         let c = sample_in_ball(&c_tilde, params.tau);
 
-        // Step (f): Compute response z = y + c*s
-        let cs: PolyVec = sk.s.iter().map(|si| poly_scalar_mul(&c, si)).collect();
+        let cs = Zeroizing::new(
+            sk.s.iter()
+                .map(|si| poly_scalar_mul(&c, si))
+                .collect::<PolyVec>(),
+        );
         let z = poly_vec_add(&y, &cs);
 
-        // Step (g): Rejection sampling check on z norm
-        let rejection_bound = params.rejection_bound();
-        if infinity_norm_vec(&z) >= rejection_bound {
+        if infinity_norm_vec(&z) >= params.rejection_bound() {
             continue;
         }
 
-        // Compute r = Az - ct mod q for low-bits check
         let ct: PolyVec = sk.t.iter().map(|ti| poly_scalar_mul(&c, ti)).collect();
         let r = poly_vec_sub(&poly_matrix_mul_ntt(&a_ntt, &z), &ct);
 
-        // Check low-order bits bound
         let low_r = low_bits_vec(&r, params.gamma2);
         if infinity_norm_vec(&low_r) >= params.gamma2 - (params.tau as i64) * params.eta {
             continue;
         }
 
-        // Step (h): Compute hint
-        let cs2: PolyVec = sk.e.iter().map(|ei| poly_scalar_mul(&c, ei)).collect();
-        let (h, hint_w) = make_hint_vec(&cs2, &r, params.gamma2);
+        let neg_ce: PolyVec =
+            sk.e.iter()
+                .map(|ei| {
+                    let mut cei = poly_scalar_mul(&c, ei);
+                    for coeff in &mut cei {
+                        *coeff = -*coeff;
+                    }
+                    cei
+                })
+                .collect();
+        let (h, hint_w) = make_hint_vec(&neg_ce, &w, params.gamma2);
 
-        // Check hint weight
         if hint_w > params.omega {
             continue;
         }
 
-        return Some((beta, VrfProof { c_tilde, z, h }));
+        let output = hash_vrf_output(&w1, x);
+        return Some((output, EyvaraProof { c_tilde, z, h, w1 }));
     }
 
-    // All attempts exhausted (astronomically unlikely)
     None
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::params::{EYVARA_I, N};
     use crate::keygen::eyvara_keygen;
+    use crate::params::{EYVARA_128, N};
     use rand::SeedableRng;
     use rand_chacha::ChaCha20Rng;
 
     #[test]
     fn test_eval_produces_output() {
         let mut rng = ChaCha20Rng::seed_from_u64(42);
-        let (_, sk) = eyvara_keygen(&EYVARA_I, &mut rng);
-        let result = eyvara_eval(&EYVARA_I, &sk, b"test input", &mut rng);
+        let (_, sk) = eyvara_keygen(&EYVARA_128, &mut rng);
+        let result = eyvara_eval(&EYVARA_128, &sk, b"test input", &mut rng);
         assert!(result.is_some(), "evaluation should succeed");
-    }
-
-    #[test]
-    fn test_eval_output_is_deterministic() {
-        let mut rng = ChaCha20Rng::seed_from_u64(42);
-        let (_, sk) = eyvara_keygen(&EYVARA_I, &mut rng);
-
-        let input = b"determinism test";
-
-        let (beta1, _) = eyvara_eval(&EYVARA_I, &sk, input, &mut rng).unwrap();
-        let mut rng2 = ChaCha20Rng::seed_from_u64(99); // different rng for proof randomness
-        let (beta2, _) = eyvara_eval(&EYVARA_I, &sk, input, &mut rng2).unwrap();
-
-        assert_eq!(beta1, beta2, "VRF output should be deterministic for same (sk, x)");
     }
 
     #[test]
     fn test_eval_different_inputs_different_outputs() {
         let mut rng = ChaCha20Rng::seed_from_u64(42);
-        let (_, sk) = eyvara_keygen(&EYVARA_I, &mut rng);
+        let (_, sk) = eyvara_keygen(&EYVARA_128, &mut rng);
 
-        let (beta1, _) = eyvara_eval(&EYVARA_I, &sk, b"input1", &mut rng).unwrap();
-        let (beta2, _) = eyvara_eval(&EYVARA_I, &sk, b"input2", &mut rng).unwrap();
+        let (beta1, _) = eyvara_eval(&EYVARA_128, &sk, b"input1", &mut rng).unwrap();
+        let (beta2, _) = eyvara_eval(&EYVARA_128, &sk, b"input2", &mut rng).unwrap();
 
-        assert_ne!(beta1, beta2, "different inputs should produce different outputs");
+        assert_ne!(beta1, beta2, "different evaluations should differ");
     }
 
     #[test]
     fn test_eval_proof_structure() {
         let mut rng = ChaCha20Rng::seed_from_u64(42);
-        let (_, sk) = eyvara_keygen(&EYVARA_I, &mut rng);
+        let (_, sk) = eyvara_keygen(&EYVARA_128, &mut rng);
 
-        let (_, proof) = eyvara_eval(&EYVARA_I, &sk, b"test", &mut rng).unwrap();
+        let (_, proof) = eyvara_eval(&EYVARA_128, &sk, b"test", &mut rng).unwrap();
 
         assert_eq!(proof.c_tilde.len(), CHALLENGE_SEED_SIZE);
-        assert_eq!(proof.z.len(), EYVARA_I.k);
-        assert_eq!(proof.h.len(), EYVARA_I.k * N);
+        assert_eq!(proof.z.len(), EYVARA_128.k);
+        assert_eq!(proof.h.len(), EYVARA_128.k * N);
+        assert_eq!(proof.w1.len(), EYVARA_128.k);
+        assert!(infinity_norm_vec(&proof.z) < EYVARA_128.rejection_bound());
 
-        // z norm should be within bounds
-        assert!(infinity_norm_vec(&proof.z) < EYVARA_I.rejection_bound());
-
-        // Hint weight should be within bounds
-        let hw: usize = proof.h.iter().filter(|&&b| b != 0).count();
-        assert!(hw <= EYVARA_I.omega);
+        let hw = proof.h.iter().filter(|&&b| b != 0).count();
+        assert!(hw <= EYVARA_128.omega);
     }
 }

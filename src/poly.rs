@@ -6,9 +6,13 @@
 //! decomposition functions essential for the Dilithium-style proof structure.
 
 use crate::ntt::{ntt_forward, ntt_inverse, ntt_pointwise_mul, reduce_coeff};
-use crate::params::{N, Q, DOMAIN_MATRIX, SEED_SIZE};
-use sha3::{Shake256, digest::{Update, ExtendableOutput, XofReader}};
+use crate::params::{DOMAIN_MATRIX, N, Q, SEED_SIZE};
 use rand::Rng;
+use sha3::{
+    digest::{ExtendableOutput, Update, XofReader},
+    Shake256,
+};
+use zeroize::Zeroize;
 
 /// A polynomial in R_q = Z_q[X]/(X^N + 1), represented as an array of N coefficients.
 /// Coefficients are stored in centered representation: each c_i ∈ [-(Q-1)/2, (Q-1)/2].
@@ -16,6 +20,15 @@ pub type Poly = [i64; N];
 
 /// A vector of polynomials, representing an element of R_q^k.
 pub type PolyVec = Vec<Poly>;
+
+/// Polynomial wrapper that zeroizes coefficients when dropped.
+pub struct ZeroizingPoly(pub Poly);
+
+impl Drop for ZeroizingPoly {
+    fn drop(&mut self) {
+        self.0.iter_mut().for_each(Zeroize::zeroize);
+    }
+}
 
 /// Create a zero polynomial.
 pub fn poly_zero() -> Poly {
@@ -71,6 +84,15 @@ pub fn poly_neg(a: &Poly) -> Poly {
 }
 
 /// Compute the infinity norm of a polynomial: max_i |a_i|.
+///
+/// # Timing Note
+///
+/// This implementation is NOT constant-time with respect to the polynomial
+/// coefficients. For production use, replace callers with a fully audited
+/// constant-time implementation using bitwise arithmetic.
+///
+/// TODO(VULN-03): migrate rejection checks to `infinity_norm_ct` after
+/// benchmarking and side-channel review on supported targets.
 pub fn infinity_norm(a: &Poly) -> i64 {
     let mut max = 0i64;
     for &coeff in a.iter() {
@@ -89,6 +111,31 @@ pub fn infinity_norm(a: &Poly) -> i64 {
     max
 }
 
+/// Compute the infinity norm using arithmetic masking for data-dependent choices.
+///
+/// This avoids explicit branches in the maximum and centered-representative
+/// selection logic. The `%` reductions may still compile to variable-latency
+/// division on some CPUs, so this function should be reviewed on each target
+/// before being treated as a production constant-time primitive.
+#[allow(clippy::cast_sign_loss)]
+pub fn infinity_norm_ct(poly: &Poly, q: i64) -> i64 {
+    let mut max_val = 0_i64;
+    let half_q = q / 2;
+
+    for &coeff in poly {
+        let c = ((coeff % q) + q) % q;
+        let gt_half_mask = !((c - half_q - 1) >> 63);
+        let centered = c - (q & gt_half_mask);
+        let abs = (centered ^ (centered >> 63)) - (centered >> 63);
+
+        let diff = abs - max_val;
+        let gt_mask = !((diff - 1) >> 63);
+        max_val += diff & gt_mask;
+    }
+
+    max_val
+}
+
 /// Compute the infinity norm of a polynomial vector: max over all component norms.
 pub fn infinity_norm_vec(v: &[Poly]) -> i64 {
     v.iter().map(|p| infinity_norm(p)).max().unwrap_or(0)
@@ -97,13 +144,19 @@ pub fn infinity_norm_vec(v: &[Poly]) -> i64 {
 /// Add two polynomial vectors component-wise.
 pub fn poly_vec_add(a: &[Poly], b: &[Poly]) -> PolyVec {
     assert_eq!(a.len(), b.len());
-    a.iter().zip(b.iter()).map(|(ai, bi)| poly_add(ai, bi)).collect()
+    a.iter()
+        .zip(b.iter())
+        .map(|(ai, bi)| poly_add(ai, bi))
+        .collect()
 }
 
 /// Subtract two polynomial vectors component-wise.
 pub fn poly_vec_sub(a: &[Poly], b: &[Poly]) -> PolyVec {
     assert_eq!(a.len(), b.len());
-    a.iter().zip(b.iter()).map(|(ai, bi)| poly_sub(ai, bi)).collect()
+    a.iter()
+        .zip(b.iter())
+        .map(|(ai, bi)| poly_sub(ai, bi))
+        .collect()
 }
 
 /// Multiply a matrix A (in NTT domain) by a vector v, producing Av mod Q.
@@ -116,11 +169,14 @@ pub fn poly_matrix_mul_ntt(a_ntt: &[Vec<Poly>], v: &[Poly]) -> PolyVec {
     let mut result = vec![poly_zero(); k];
 
     // Transform v to NTT domain
-    let v_ntt: Vec<Poly> = v.iter().map(|p| {
-        let mut pn = *p;
-        ntt_forward(&mut pn);
-        pn
-    }).collect();
+    let v_ntt: Vec<Poly> = v
+        .iter()
+        .map(|p| {
+            let mut pn = *p;
+            ntt_forward(&mut pn);
+            pn
+        })
+        .collect();
 
     for i in 0..k {
         let mut acc = poly_zero();
@@ -162,7 +218,8 @@ pub fn expand_a(rho: &[u8; SEED_SIZE], k: usize) -> Vec<Vec<Poly>> {
                 reader.read(&mut buf);
                 // Rejection sampling: interpret 3 bytes as a 24-bit integer,
                 // mask to 23 bits, and accept if < Q.
-                let val = ((buf[0] as i64) | ((buf[1] as i64) << 8) | ((buf[2] as i64) << 16)) & 0x7F_FFFF;
+                let val = ((buf[0] as i64) | ((buf[1] as i64) << 8) | ((buf[2] as i64) << 16))
+                    & 0x7F_FFFF;
                 if val < Q {
                     poly[idx] = val;
                     if poly[idx] > Q / 2 {
@@ -313,7 +370,11 @@ pub fn low_bits_vec(v: &[Poly], gamma2: i64) -> PolyVec {
 pub fn make_hint_coeff(z: i64, r: i64, gamma2: i64) -> i8 {
     let r1 = high_bits(r, gamma2);
     let v1 = high_bits(((r + z) % Q + Q) % Q, gamma2);
-    if r1 != v1 { 1 } else { 0 }
+    if r1 != v1 {
+        1
+    } else {
+        0
+    }
 }
 
 /// Apply the hint to recover HighBits(r + z, alpha) from r and the hint.
@@ -417,7 +478,7 @@ pub fn poly_vec_to_bytes(v: &[Poly]) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::params::EYVARA_I;
+    use crate::params::EYVARA_128;
     use rand::{Rng, SeedableRng};
     use rand_chacha::ChaCha20Rng;
 
@@ -437,7 +498,7 @@ mod tests {
     fn test_high_low_bits_reconstruction() {
         let mut rng = ChaCha20Rng::seed_from_u64(42);
         let p = sample_uniform_gamma1_vec(&mut rng, 1, 1000)[0];
-        let gamma2 = EYVARA_I.gamma2;
+        let gamma2 = EYVARA_128.gamma2;
 
         let w1 = high_bits_poly(&p, gamma2);
         let w0 = low_bits_poly(&p, gamma2);
@@ -458,7 +519,7 @@ mod tests {
 
     #[test]
     fn test_make_use_hint_roundtrip() {
-        let gamma2 = EYVARA_I.gamma2;
+        let gamma2 = EYVARA_128.gamma2;
         let mut rng = ChaCha20Rng::seed_from_u64(99);
 
         for _ in 0..100 {
@@ -480,10 +541,14 @@ mod tests {
     #[test]
     fn test_sample_uniform_gamma1_bounds() {
         let mut rng = ChaCha20Rng::seed_from_u64(7);
-        let gamma1 = EYVARA_I.gamma1;
+        let gamma1 = EYVARA_128.gamma1;
         let p = sample_uniform_gamma1(&mut rng, gamma1);
         for &c in p.iter() {
-            assert!(c >= -gamma1 + 1 && c <= gamma1, "coefficient {} out of range", c);
+            assert!(
+                c >= -gamma1 + 1 && c <= gamma1,
+                "coefficient {} out of range",
+                c
+            );
         }
     }
 
