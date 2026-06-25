@@ -4,7 +4,7 @@
 //! performance for the Eyvara-I parameter set.
 
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
-use eyvara_vrf::{eyvara_eval, eyvara_keygen, eyvara_verify, EYVARA_128};
+use eyvara::{eyvara_eval, eyvara_keygen, eyvara_verify, EYVARA_128};
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
 

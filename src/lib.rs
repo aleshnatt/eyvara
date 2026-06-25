@@ -24,7 +24,7 @@
 
 //!
 //! ```rust
-//! use eyvara_vrf::{eyvara_eval, eyvara_keygen, eyvara_verify, EyvaraError, EYVARA_128};
+//! use eyvara::{eyvara_eval, eyvara_keygen, eyvara_verify, EyvaraError, EYVARA_128};
 //! use rand::rngs::OsRng;
 //!
 //! fn main() -> Result<(), EyvaraError> {

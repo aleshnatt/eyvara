@@ -1,13 +1,13 @@
 [package]
-name = "eyvara_vrf"
+name = "eyvara-vrf"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.70"
 authors = ["Naufal Ziyaadaturrahman <naufal@aleshnatt.com>"]
 description = "Post-quantum lattice-based Verifiable Random Function (VRF) from Module-LWE with tight uniqueness in the Quantum Random Oracle Model"
-documentation = "https://docs.rs/eyvara_vrf"
-homepage = "https://github.com/aleshnatt/eyvara-vrf"
-repository = "https://github.com/aleshnatt/eyvara-vrf"
+documentation = "https://docs.rs/eyvara-vrf"
+homepage = "https://github.com/aleshnatt/eyvara"
+repository = "https://github.com/aleshnatt/eyvara"
 readme = "README.md"
 license = "MIT OR Apache-2.0"
 keywords = ["cryptography", "post-quantum", "vrf", "lattice", "mlwe"]
@@ -15,7 +15,7 @@ categories = ["cryptography"]
 exclude = ["paper/", ".github/", "audit/", ".DS_Store"]
 
 [lib]
-name = "eyvara_vrf"
+name = "eyvara"
 path = "src/lib.rs"
 
 [dependencies]

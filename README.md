@@ -1,7 +1,7 @@
-# eyvara_vrf
+# eyvara-vrf
 
-[![Crates.io](https://img.shields.io/crates/v/eyvara_vrf.svg)](https://crates.io/crates/eyvara_vrf)
-[![docs.rs](https://img.shields.io/docsrs/eyvara_vrf)](https://docs.rs/eyvara_vrf)
+[![Crates.io](https://img.shields.io/crates/v/eyvara-vrf.svg)](https://crates.io/crates/eyvara-vrf)
+[![docs.rs](https://img.shields.io/docsrs/eyvara-vrf)](https://docs.rs/eyvara-vrf)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)]()
 
 ## What is a VRF
@@ -19,8 +19,8 @@ side-channel resistance is required.
 ## Quick Start
 
 ```rust
-use eyvara_vrf::{eyvara_eval, eyvara_keygen, eyvara_verify, EyvaraError};
-use eyvara_vrf::params::EYVARA_128;
+use eyvara::{eyvara_eval, eyvara_keygen, eyvara_verify, EyvaraError};
+use eyvara::params::EYVARA_128;
 use rand::rngs::OsRng;
 
 fn main() -> Result<(), EyvaraError> {
@@ -46,7 +46,7 @@ fn main() -> Result<(), EyvaraError> {
 The `serde` feature enables `Serialize` and `Deserialize` for `PublicKey`, `EyvaraProof`, and `EyvaraOutput`. `SecretKey` supports `Serialize` only, so explicit key import from untrusted data is not provided by this crate.
 
 ```toml
-eyvara_vrf = { version = "0.1", features = ["serde"] }
+eyvara-vrf = { version = "0.1", features = ["serde"] }
 ```
 
 ## Building, Testing, Benchmarking
