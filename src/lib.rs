@@ -21,7 +21,6 @@
 #![allow(clippy::module_name_repetitions)]
 #![allow(clippy::similar_names)]
 
-
 //!
 //! ```rust
 //! use eyvara::{eyvara_eval, eyvara_keygen, eyvara_verify, EyvaraError, EYVARA_128};
@@ -31,7 +30,7 @@
 //!     let mut rng = OsRng;
 //!     let (pk, sk) = eyvara_keygen(&EYVARA_128, &mut rng);
 //!     let msg = b"example input";
-//!     let (out, proof) = eyvara_eval(&EYVARA_128, &sk, msg, &mut rng)?;
+//!     let (out, proof) = eyvara_eval(&EYVARA_128, &sk, msg)?;
 //!     assert!(eyvara_verify(&EYVARA_128, &pk, msg, &out, &proof)?);
 //!     Ok(())
 //! }

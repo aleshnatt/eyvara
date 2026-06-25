@@ -28,13 +28,9 @@ fn bench_eval(c: &mut Criterion) {
     let input = b"benchmark_eval_input";
 
     c.bench_function("eyvara_i_eval", |b| {
-        b.iter_batched(
-            || ChaCha20Rng::seed_from_u64(99),
-            |mut rng| {
-                let _ = eyvara_eval(&EYVARA_128, &sk, input, &mut rng).unwrap();
-            },
-            BatchSize::SmallInput,
-        );
+        b.iter(|| {
+            let _ = eyvara_eval(&EYVARA_128, &sk, input).unwrap();
+        });
     });
 }
 
@@ -43,7 +39,7 @@ fn bench_verify(c: &mut Criterion) {
     let mut rng = ChaCha20Rng::seed_from_u64(42);
     let (pk, sk) = eyvara_keygen(&EYVARA_128, &mut rng);
     let input = b"benchmark_verify_input";
-    let (beta, proof) = eyvara_eval(&EYVARA_128, &sk, input, &mut rng).unwrap();
+    let (beta, proof) = eyvara_eval(&EYVARA_128, &sk, input).unwrap();
 
     c.bench_function("eyvara_i_verify", |b| {
         b.iter(|| {
@@ -60,7 +56,7 @@ fn bench_full_round_trip(c: &mut Criterion) {
             |mut rng| {
                 let (pk, sk) = eyvara_keygen(&EYVARA_128, &mut rng);
                 let input = b"round_trip_input";
-                let (beta, proof) = eyvara_eval(&EYVARA_128, &sk, input, &mut rng).unwrap();
+                let (beta, proof) = eyvara_eval(&EYVARA_128, &sk, input).unwrap();
                 let _ = eyvara_verify(&EYVARA_128, &pk, input, &beta, &proof).unwrap();
             },
             BatchSize::SmallInput,

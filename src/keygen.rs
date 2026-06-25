@@ -26,6 +26,7 @@ pub struct PublicKey {
 /// are redacted in debug output. The key zeroizes its memory when dropped.
 #[derive(Zeroize, ZeroizeOnDrop)]
 pub struct SecretKey {
+    seed: [u8; SEED_SIZE],
     rho: [u8; SEED_SIZE],
     s: PolyVec,
     e: PolyVec,
@@ -83,7 +84,8 @@ impl serde::Serialize for SecretKey {
     {
         use serde::ser::SerializeStruct;
 
-        let mut state = serializer.serialize_struct("SecretKey", 4)?;
+        let mut state = serializer.serialize_struct("SecretKey", 5)?;
+        state.serialize_field("seed", &self.seed.as_slice())?;
         state.serialize_field("rho", &self.rho.as_slice())?;
         state.serialize_field("s", &crate::poly::polyvec_to_nested_vec(&self.s))?;
         state.serialize_field("e", &crate::poly::polyvec_to_nested_vec(&self.e))?;
@@ -93,6 +95,30 @@ impl serde::Serialize for SecretKey {
 }
 
 impl SecretKey {
+    /// Reconstructs a `SecretKey` from its serialized components.
+    ///
+    /// All fields must have been produced by a prior call to [`eyvara_keygen`].
+    /// No validation of the cryptographic relationship between fields is
+    /// performed.
+    #[cfg(feature = "serde")]
+    pub fn from_parts(
+        rho: [u8; SEED_SIZE],
+        s: PolyVec,
+        e: PolyVec,
+        t: PolyVec,
+        seed: [u8; SEED_SIZE],
+    ) -> Self {
+        let public_key = PublicKey { rho, t: t.clone() };
+        Self {
+            seed,
+            rho,
+            s,
+            e,
+            t,
+            public_key,
+        }
+    }
+
     /// Returns the public matrix seed. Safe to expose.
     pub fn rho(&self) -> &[u8; SEED_SIZE] {
         &self.rho
@@ -116,6 +142,10 @@ impl SecretKey {
     pub(crate) fn t(&self) -> &PolyVec {
         &self.t
     }
+
+    pub(crate) fn seed(&self) -> &[u8; SEED_SIZE] {
+        &self.seed
+    }
 }
 
 impl std::fmt::Debug for SecretKey {
@@ -123,6 +153,7 @@ impl std::fmt::Debug for SecretKey {
         // Redact secret material from debug output.
         f.debug_struct("SecretKey")
             .field("rho", &self.rho)
+            .field("seed", &"[REDACTED]")
             .field("s", &"[REDACTED]")
             .field("e", &"[REDACTED]")
             .field("t", &"[REDACTED]")
@@ -137,6 +168,9 @@ pub fn eyvara_keygen<R>(params: &Params, rng: &mut R) -> (PublicKey, SecretKey)
 where
     R: CryptoRng + RngCore,
 {
+    let mut seed = [0u8; SEED_SIZE];
+    rng.fill_bytes(&mut seed);
+
     let mut rho = [0u8; SEED_SIZE];
     rng.fill_bytes(&mut rho);
 
@@ -171,6 +205,7 @@ where
 
     let pk = PublicKey { rho, t: t.clone() };
     let sk = SecretKey {
+        seed,
         rho,
         s,
         e,

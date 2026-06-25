@@ -17,7 +17,7 @@ fn test_correctness_eyvara_128() {
 
     for i in 0..5 {
         let input = format!("correctness_test_{i}");
-        let (beta, proof) = eyvara_eval(&EYVARA_128, &sk, input.as_bytes(), &mut rng).unwrap();
+        let (beta, proof) = eyvara_eval(&EYVARA_128, &sk, input.as_bytes()).unwrap();
 
         assert!(
             eyvara_verify(&EYVARA_128, &pk, input.as_bytes(), &beta, &proof).unwrap(),
@@ -33,7 +33,7 @@ fn test_correctness_eyvara_192() {
     let (pk, sk) = eyvara_keygen(&EYVARA_192, &mut rng);
 
     let input = b"eyvara_192_correctness";
-    let (beta, proof) = eyvara_eval(&EYVARA_192, &sk, input, &mut rng).unwrap();
+    let (beta, proof) = eyvara_eval(&EYVARA_192, &sk, input).unwrap();
 
     assert!(
         eyvara_verify(&EYVARA_192, &pk, input, &beta, &proof).unwrap(),
@@ -42,11 +42,55 @@ fn test_correctness_eyvara_192() {
 }
 
 #[test]
+fn test_eval_is_deterministic() {
+    // Seeded for determinism; real usage requires OsRng.
+    let mut rng = ChaCha20Rng::seed_from_u64(42);
+    let (pk, sk) = eyvara_keygen(&EYVARA_128, &mut rng);
+    let input = b"deterministic_eval";
+
+    let (output1, proof1) = eyvara_eval(&EYVARA_128, &sk, input).unwrap();
+    let (output2, proof2) = eyvara_eval(&EYVARA_128, &sk, input).unwrap();
+
+    assert_eq!(output1, output2);
+    assert_eq!(proof1.c_tilde, proof2.c_tilde);
+    assert_eq!(proof1.z, proof2.z);
+    assert!(eyvara_verify(&EYVARA_128, &pk, input, &output1, &proof1).unwrap());
+}
+
+#[test]
+fn test_eval_different_inputs_differ() {
+    // Seeded for determinism; real usage requires OsRng.
+    let mut rng = ChaCha20Rng::seed_from_u64(42);
+    let (_, sk) = eyvara_keygen(&EYVARA_128, &mut rng);
+
+    let (output_a, _) = eyvara_eval(&EYVARA_128, &sk, b"input_a").unwrap();
+    let (output_b, _) = eyvara_eval(&EYVARA_128, &sk, b"input_b").unwrap();
+
+    assert_ne!(output_a, output_b);
+}
+
+#[test]
+fn test_eval_different_keys_differ() {
+    // Seeded for determinism; real usage requires OsRng.
+    let mut rng1 = ChaCha20Rng::seed_from_u64(42);
+    let (_, sk1) = eyvara_keygen(&EYVARA_128, &mut rng1);
+    // Seeded for determinism; real usage requires OsRng.
+    let mut rng2 = ChaCha20Rng::seed_from_u64(43);
+    let (_, sk2) = eyvara_keygen(&EYVARA_128, &mut rng2);
+    let input = b"same_input";
+
+    let (output1, _) = eyvara_eval(&EYVARA_128, &sk1, input).unwrap();
+    let (output2, _) = eyvara_eval(&EYVARA_128, &sk2, input).unwrap();
+
+    assert_ne!(output1, output2);
+}
+
+#[test]
 fn test_wrong_key() {
     // Seeded for determinism; real usage requires OsRng.
     let mut rng = ChaCha20Rng::seed_from_u64(42);
     let (_, sk1) = eyvara_keygen(&EYVARA_128, &mut rng);
-    let (beta, proof) = eyvara_eval(&EYVARA_128, &sk1, b"wrong_key_test", &mut rng).unwrap();
+    let (beta, proof) = eyvara_eval(&EYVARA_128, &sk1, b"wrong_key_test").unwrap();
 
     // Seeded for determinism; real usage requires OsRng.
     let mut rng2 = ChaCha20Rng::seed_from_u64(77);
@@ -63,7 +107,7 @@ fn test_wrong_input() {
     // Seeded for determinism; real usage requires OsRng.
     let mut rng = ChaCha20Rng::seed_from_u64(42);
     let (pk, sk) = eyvara_keygen(&EYVARA_128, &mut rng);
-    let (beta, proof) = eyvara_eval(&EYVARA_128, &sk, b"original_input", &mut rng).unwrap();
+    let (beta, proof) = eyvara_eval(&EYVARA_128, &sk, b"original_input").unwrap();
 
     assert_eq!(
         eyvara_verify(&EYVARA_128, &pk, b"modified_input", &beta, &proof),
@@ -77,7 +121,7 @@ fn test_tampered_proof() {
     let mut rng = ChaCha20Rng::seed_from_u64(42);
     let (pk, sk) = eyvara_keygen(&EYVARA_128, &mut rng);
     let input = b"tamper_test";
-    let (beta, proof) = eyvara_eval(&EYVARA_128, &sk, input, &mut rng).unwrap();
+    let (beta, proof) = eyvara_eval(&EYVARA_128, &sk, input).unwrap();
 
     let mut tampered = proof.clone();
     tampered.c_tilde[0] ^= 0xFF;
@@ -101,7 +145,7 @@ fn test_tampered_output_rejected() {
     let mut rng = ChaCha20Rng::seed_from_u64(42);
     let (pk, sk) = eyvara_keygen(&EYVARA_128, &mut rng);
     let input = b"tampered_output";
-    let (mut output, proof) = eyvara_eval(&EYVARA_128, &sk, input, &mut rng).unwrap();
+    let (mut output, proof) = eyvara_eval(&EYVARA_128, &sk, input).unwrap();
 
     output[0] ^= 1;
 
@@ -117,7 +161,7 @@ fn test_wrong_output_all_zeros() {
     let mut rng = ChaCha20Rng::seed_from_u64(43);
     let (pk, sk) = eyvara_keygen(&EYVARA_128, &mut rng);
     let input = b"zero_output";
-    let (_output, proof) = eyvara_eval(&EYVARA_128, &sk, input, &mut rng).unwrap();
+    let (_output, proof) = eyvara_eval(&EYVARA_128, &sk, input).unwrap();
     let zero_output = EyvaraOutput([0_u8; OUTPUT_SIZE]);
 
     assert_eq!(
@@ -141,7 +185,7 @@ fn test_rejection_sampling_terminates() {
 
     for i in 0..100 {
         let input = format!("rejection_test_{i}");
-        let result = eyvara_eval(&EYVARA_128, &sk, input.as_bytes(), &mut rng);
+        let result = eyvara_eval(&EYVARA_128, &sk, input.as_bytes());
         assert!(
             result.is_ok(),
             "evaluation should complete for input '{input}'"
@@ -160,7 +204,7 @@ fn test_output_is_uniform_looking() {
 
     for i in 0..num_samples {
         let input = format!("uniformity_test_{i}");
-        let (beta, _) = eyvara_eval(&EYVARA_128, &sk, input.as_bytes(), &mut rng).unwrap();
+        let (beta, _) = eyvara_eval(&EYVARA_128, &sk, input.as_bytes()).unwrap();
         for &b in beta.as_ref() {
             byte_counts[usize::from(b)] += 1;
         }
@@ -187,7 +231,7 @@ fn test_proof_norm_bounds() {
 
     for i in 0..20 {
         let input = format!("norm_test_{i}");
-        let (_, proof) = eyvara_eval(&EYVARA_128, &sk, input.as_bytes(), &mut rng).unwrap();
+        let (_, proof) = eyvara_eval(&EYVARA_128, &sk, input.as_bytes()).unwrap();
 
         let norm = infinity_norm_vec(&proof.z);
         assert!(
@@ -204,7 +248,7 @@ fn test_malformed_proof_returns_err() {
     let mut rng = ChaCha20Rng::seed_from_u64(42);
     let (pk, sk) = eyvara_keygen(&EYVARA_128, &mut rng);
     let input = b"malformed_test";
-    let (beta, proof) = eyvara_eval(&EYVARA_128, &sk, input, &mut rng).unwrap();
+    let (beta, proof) = eyvara_eval(&EYVARA_128, &sk, input).unwrap();
 
     let mut bad = proof.clone();
     bad.z.push([0_i64; N]);
@@ -234,7 +278,7 @@ fn test_malformed_pubkey_returns_err() {
     let mut rng = ChaCha20Rng::seed_from_u64(42);
     let (mut pk, sk) = eyvara_keygen(&EYVARA_128, &mut rng);
     let input = b"malformed_public_key";
-    let (beta, proof) = eyvara_eval(&EYVARA_128, &sk, input, &mut rng).unwrap();
+    let (beta, proof) = eyvara_eval(&EYVARA_128, &sk, input).unwrap();
 
     pk.t.pop();
     assert_eq!(
@@ -250,7 +294,7 @@ fn test_empty_input() {
     let (pk, sk) = eyvara_keygen(&EYVARA_128, &mut rng);
 
     let input = b"";
-    let (beta, proof) = eyvara_eval(&EYVARA_128, &sk, input, &mut rng).unwrap();
+    let (beta, proof) = eyvara_eval(&EYVARA_128, &sk, input).unwrap();
 
     assert!(eyvara_verify(&EYVARA_128, &pk, input, &beta, &proof).unwrap());
 }
@@ -262,7 +306,7 @@ fn test_long_input() {
     let (pk, sk) = eyvara_keygen(&EYVARA_128, &mut rng);
 
     let input = vec![0xAB_u8; 10_000];
-    let (beta, proof) = eyvara_eval(&EYVARA_128, &sk, &input, &mut rng).unwrap();
+    let (beta, proof) = eyvara_eval(&EYVARA_128, &sk, &input).unwrap();
 
     assert!(eyvara_verify(&EYVARA_128, &pk, &input, &beta, &proof).unwrap());
 }

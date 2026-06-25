@@ -5,7 +5,7 @@
 
 use crate::error::EyvaraError;
 use crate::ntt::{ntt_forward, ntt_inverse, ntt_pointwise_mul, reduce_coeff};
-use crate::params::{DOMAIN_MATRIX, N, Q, SEED_SIZE};
+use crate::params::{Params, DOMAIN_MATRIX, N, Q, SEED_SIZE};
 use rand::RngCore;
 use sha3::{
     digest::{ExtendableOutput, Update, XofReader},
@@ -87,7 +87,6 @@ pub fn poly_neg(a: &Poly) -> Poly {
 /// secret key. Consequently, this function may leak information about the
 /// secret key through timing side channels on platforms where integer division
 /// or branching is not constant-time.
-
 pub fn infinity_norm(a: &Poly) -> i64 {
     let mut max = 0i64;
     for &coeff in a {
@@ -261,6 +260,33 @@ pub fn sample_uniform_gamma1<R: RngCore>(rng: &mut R, gamma1: i64) -> Poly {
             }
         }
     }
+    poly
+}
+
+/// Deterministically sample a polynomial from `[-gamma1 + 1, gamma1]`.
+pub fn sample_uniform_poly_from_seed(seed: &[u8; SEED_SIZE], params: &Params) -> Poly {
+    let mut hasher = Shake256::default();
+    hasher.update(seed);
+    let mut reader = hasher.finalize_xof();
+
+    let gamma1 = params.gamma_1();
+    let range = 2 * gamma1;
+    let range_u64 = range as u64;
+    let bound = (u64::MAX / range_u64) * range_u64;
+    let mut poly = poly_zero();
+
+    for coeff in &mut poly {
+        loop {
+            let mut buf = [0_u8; 8];
+            reader.read(&mut buf);
+            let r = u64::from_le_bytes(buf);
+            if r < bound {
+                *coeff = (r % range_u64) as i64 - gamma1 + 1;
+                break;
+            }
+        }
+    }
+
     poly
 }
 

@@ -8,13 +8,13 @@
 
 A verifiable random function (VRF) lets a secret-key holder compute a deterministic pseudorandom output for an input and publish a proof that anyone can verify with the corresponding public key. For a fixed secret key and input, the output is unique; without the secret key, it should be computationally infeasible to predict the output before seeing a valid proof.
 
-Post-quantum VRFs target deployments where long-term security should not depend on classical elliptic-curve assumptions. Eyvara is a lattice-based construction from Module-LWE.
 
 ## Security Notice
 
 Known limitations: `infinity_norm` is not constant-time, and the rejection
 sampling loop has input-dependent timing. Do not use in systems where
 side-channel resistance is required.
+
 
 ## Quick Start
 
@@ -27,7 +27,7 @@ fn main() -> Result<(), EyvaraError> {
     let mut rng = OsRng;
     let (pk, sk) = eyvara_keygen(&EYVARA_128, &mut rng);
     let input = b"my application input";
-    let (output, proof) = eyvara_eval(&EYVARA_128, &sk, input, &mut rng)?;
+    let (output, proof) = eyvara_eval(&EYVARA_128, &sk, input)?;
     let valid = eyvara_verify(&EYVARA_128, &pk, input, &output, &proof)?;
     assert!(valid);
     Ok(())
@@ -43,7 +43,7 @@ fn main() -> Result<(), EyvaraError> {
 
 ## Optional Features
 
-The `serde` feature enables `Serialize` and `Deserialize` for `PublicKey`, `EyvaraProof`, and `EyvaraOutput`. `SecretKey` supports `Serialize` only, so explicit key import from untrusted data is not provided by this crate.
+The `serde` feature enables `Serialize` and `Deserialize` for `PublicKey`, `EyvaraProof`, and `EyvaraOutput`. `SecretKey` supports `Serialize` only; reconstruction is available from trusted serialized components, but untrusted key import is not provided by this crate.
 
 ```toml
 eyvara-vrf = { version = "0.1", features = ["serde"] }

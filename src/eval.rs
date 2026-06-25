@@ -6,12 +6,15 @@
 use crate::challenge::{hash_to_challenge_seed, hash_vrf_output, sample_in_ball};
 use crate::error::EyvaraError;
 use crate::keygen::SecretKey;
-use crate::params::{Params, CHALLENGE_SEED_SIZE, MAX_ATTEMPTS, OUTPUT_SIZE};
+use crate::params::{Params, CHALLENGE_SEED_SIZE, MAX_ATTEMPTS, OUTPUT_SIZE, SEED_SIZE};
 use crate::poly::{
     expand_a, high_bits_vec, infinity_norm_vec, low_bits_vec, make_hint_vec, poly_matrix_mul_ntt,
-    poly_scalar_mul, poly_vec_add, poly_vec_sub, sample_uniform_gamma1_vec, PolyVec,
+    poly_scalar_mul, poly_vec_add, poly_vec_sub, sample_uniform_poly_from_seed, PolyVec,
 };
-use rand::{CryptoRng, RngCore};
+use sha3::{
+    digest::{ExtendableOutput, Update, XofReader},
+    Shake256,
+};
 use zeroize::Zeroizing;
 
 /// VRF output: a 64-byte pseudorandom value.
@@ -165,22 +168,18 @@ impl<'de> serde::Deserialize<'de> for EyvaraProof {
 ///
 /// Returns [`EyvaraError::RejectionSamplingFailed`] if all `MAX_ATTEMPTS`
 /// rejection-sampling iterations fail.
-pub fn eyvara_eval<R>(
+pub fn eyvara_eval(
     params: &Params,
     sk: &SecretKey,
     x: &[u8],
-    rng: &mut R,
-) -> Result<(EyvaraOutput, EyvaraProof), EyvaraError>
-where
-    R: CryptoRng + RngCore,
-{
+) -> Result<(EyvaraOutput, EyvaraProof), EyvaraError> {
     let a_ntt = expand_a(sk.rho(), params.k());
 
     // Rejection sampling usually succeeds quickly; EYVARA_128 is expected to
     // need roughly four attempts or fewer in normal runs.
-    for _ in 0..MAX_ATTEMPTS {
+    for attempt in 0..MAX_ATTEMPTS {
         // y masks the secret contribution in z, so wipe it after each attempt.
-        let y = Zeroizing::new(sample_uniform_gamma1_vec(rng, params.k(), params.gamma_1()));
+        let y = Zeroizing::new(sample_mask_vector(sk, x, attempt, params));
 
         let w = poly_matrix_mul_ntt(&a_ntt, &y);
         let w1 = high_bits_vec(&w, params.gamma_2());
@@ -233,6 +232,27 @@ where
     Err(EyvaraError::RejectionSamplingFailed)
 }
 
+fn sample_mask_vector(sk: &SecretKey, x: &[u8], attempt: usize, params: &Params) -> PolyVec {
+    let mut attempt_seed = Zeroizing::new([0_u8; SEED_SIZE]);
+    let mut xof = Shake256::default();
+    xof.update(b"eyvara-eval-mask");
+    xof.update(sk.seed());
+    xof.update(x);
+    xof.update(&(attempt as u64).to_le_bytes());
+    xof.finalize_xof().read(&mut *attempt_seed);
+
+    (0..params.k())
+        .map(|idx| {
+            let mut component_seed = Zeroizing::new([0_u8; SEED_SIZE]);
+            let mut xof = Shake256::default();
+            xof.update(&*attempt_seed);
+            xof.update(&(idx as u64).to_le_bytes());
+            xof.finalize_xof().read(&mut *component_seed);
+            sample_uniform_poly_from_seed(&component_seed, params)
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -246,7 +266,7 @@ mod tests {
         // Seeded for determinism; real usage requires OsRng.
         let mut rng = ChaCha20Rng::seed_from_u64(42);
         let (_, sk) = eyvara_keygen(&EYVARA_128, &mut rng);
-        let result = eyvara_eval(&EYVARA_128, &sk, b"test input", &mut rng);
+        let result = eyvara_eval(&EYVARA_128, &sk, b"test input");
         assert!(result.is_ok(), "evaluation should succeed");
     }
 
@@ -256,8 +276,8 @@ mod tests {
         let mut rng = ChaCha20Rng::seed_from_u64(42);
         let (_, sk) = eyvara_keygen(&EYVARA_128, &mut rng);
 
-        let (beta1, _) = eyvara_eval(&EYVARA_128, &sk, b"input1", &mut rng).unwrap();
-        let (beta2, _) = eyvara_eval(&EYVARA_128, &sk, b"input2", &mut rng).unwrap();
+        let (beta1, _) = eyvara_eval(&EYVARA_128, &sk, b"input1").unwrap();
+        let (beta2, _) = eyvara_eval(&EYVARA_128, &sk, b"input2").unwrap();
 
         assert_ne!(beta1, beta2, "different evaluations should differ");
     }
@@ -268,7 +288,7 @@ mod tests {
         let mut rng = ChaCha20Rng::seed_from_u64(42);
         let (_, sk) = eyvara_keygen(&EYVARA_128, &mut rng);
 
-        let (_, proof) = eyvara_eval(&EYVARA_128, &sk, b"test", &mut rng).unwrap();
+        let (_, proof) = eyvara_eval(&EYVARA_128, &sk, b"test").unwrap();
 
         assert_eq!(proof.c_tilde.len(), CHALLENGE_SEED_SIZE);
         assert_eq!(proof.z.len(), EYVARA_128.k());

@@ -96,7 +96,7 @@ mod tests {
         let mut rng = ChaCha20Rng::seed_from_u64(42);
         let (pk, sk) = eyvara_keygen(&EYVARA_128, &mut rng);
         let input = b"verify test";
-        let (beta, proof) = eyvara_eval(&EYVARA_128, &sk, input, &mut rng).unwrap();
+        let (beta, proof) = eyvara_eval(&EYVARA_128, &sk, input).unwrap();
 
         assert!(
             eyvara_verify(&EYVARA_128, &pk, input, &beta, &proof).unwrap(),
@@ -109,7 +109,7 @@ mod tests {
         // Seeded for determinism; real usage requires OsRng.
         let mut rng = ChaCha20Rng::seed_from_u64(42);
         let (pk, sk) = eyvara_keygen(&EYVARA_128, &mut rng);
-        let (beta, proof) = eyvara_eval(&EYVARA_128, &sk, b"correct input", &mut rng).unwrap();
+        let (beta, proof) = eyvara_eval(&EYVARA_128, &sk, b"correct input").unwrap();
 
         assert_eq!(
             eyvara_verify(&EYVARA_128, &pk, b"wrong input", &beta, &proof),
@@ -122,7 +122,7 @@ mod tests {
         // Seeded for determinism; real usage requires OsRng.
         let mut rng = ChaCha20Rng::seed_from_u64(42);
         let (_, sk) = eyvara_keygen(&EYVARA_128, &mut rng);
-        let (beta, proof) = eyvara_eval(&EYVARA_128, &sk, b"test", &mut rng).unwrap();
+        let (beta, proof) = eyvara_eval(&EYVARA_128, &sk, b"test").unwrap();
 
         // Seeded for determinism; real usage requires OsRng.
         let mut rng2 = ChaCha20Rng::seed_from_u64(99);
@@ -139,7 +139,7 @@ mod tests {
         // Seeded for determinism; real usage requires OsRng.
         let mut rng = ChaCha20Rng::seed_from_u64(42);
         let (pk, sk) = eyvara_keygen(&EYVARA_128, &mut rng);
-        let (beta, mut proof) = eyvara_eval(&EYVARA_128, &sk, b"tamper test", &mut rng).unwrap();
+        let (beta, mut proof) = eyvara_eval(&EYVARA_128, &sk, b"tamper test").unwrap();
 
         proof.c_tilde[0] ^= 1;
 
