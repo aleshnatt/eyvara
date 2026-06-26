@@ -12,7 +12,7 @@ readme = "README.md"
 license = "MIT OR Apache-2.0"
 keywords = ["cryptography", "post-quantum", "vrf", "lattice", "mlwe"]
 categories = ["cryptography"]
-exclude = ["paper/", ".github/", "audit/", ".DS_Store"]
+exclude = [".github/", ".DS_Store"]
 
 [lib]
 name = "eyvara"
